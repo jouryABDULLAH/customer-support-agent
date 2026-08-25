@@ -6,6 +6,8 @@ RAG_TENANT = os.environ.get("RAG_TENANT", "customer_support_demo")
 
 DOCS_DIR = os.environ.get("DOCS_DIR", "Docs")
 
+APP_DB_PATH = os.environ.get("APP_DB_PATH", "data/app.db")
+
 # Wall-clock ceiling for one `find()` call. ragent2 defaults to 120s. 
 FIND_TIMEOUT_SECONDS = float(os.environ.get("FIND_TIMEOUT_SECONDS", "420"))
 

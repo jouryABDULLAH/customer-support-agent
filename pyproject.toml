@@ -18,3 +18,9 @@ dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# setuptools ships only .py files by default, which would leave `db/` without
+# the schema it reads at connect time. Without this, `pip install .` builds a
+# wheel whose `init_db()` raises FileNotFoundError.
+[tool.setuptools.package-data]
+customer_support = ["**/*.sql"]
