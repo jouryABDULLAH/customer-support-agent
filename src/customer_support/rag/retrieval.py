@@ -118,7 +118,7 @@ def normalize(result: Result) -> RetrievalResult:
     )
 
     outcome: RetrievalOutcome
-    if evidence: # result.chunks is empty
+    if evidence: # result.chunks is not empty
         outcome = "usable_evidence"
     elif ignored_count:
         outcome = "only_ignored" # chunks were returned; grader and judged every one unhelpful 
