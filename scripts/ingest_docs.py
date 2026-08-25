@@ -6,10 +6,8 @@
 Explicit developer operation; nothing calls this on application startup.
 """
 
-
 import logging
 import sys
-
 from customer_support.config import DOCS_DIR
 from customer_support.rag.client import check_health
 from customer_support.rag.ingestion import ingest_directory
