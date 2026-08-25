@@ -67,6 +67,30 @@ class RetrievalResult:
         return bool(self.warnings)
 
 
+def relation_for(relation: str) -> EvidenceRelation:
+    """Map a ragent2 relation name onto this application's own.
+
+    A plain `.lower()` would be a `str`, which is not one of the four names
+    `EvidenceRelation` allows; going through this table both narrows the type
+    and rejects anything ragent2 might add later, mapping it to `unjudged` --
+    "nobody usefully graded this" -- rather than inventing a relation.
+    """
+    known: dict[str, EvidenceRelation] = {
+        "DIRECT": "direct",
+        "INFERENTIAL": "inferential",
+        "CONTEXT": "context",
+        "UNJUDGED": "unjudged",
+    }
+    resolved = known.get(relation.upper())
+    if resolved is None:
+        logger.warning(
+            "retrieval: unrecognized ragent2 relation %r; treating it as unjudged.",
+            relation,
+        )
+        return "unjudged"
+    return resolved
+
+
 def confidence_for(relation: str) -> ConfidenceLevel:
     """Map a ragent2 relation to this application's confidence level.
 
@@ -82,7 +106,7 @@ def normalize(result: Result) -> RetrievalResult:
     evidence = tuple(
         EvidenceItem(
             content=chunk.text,
-            relation=chunk.relation.lower(),
+            relation=relation_for(chunk.relation),
             confidence=confidence_for(chunk.relation),
             reason=chunk.reason,
             source=chunk.source,
@@ -93,6 +117,7 @@ def normalize(result: Result) -> RetrievalResult:
         1 for entry in result.diagnostics.trace if entry.relation == IGNORE
     )
 
+    outcome: RetrievalOutcome
     if evidence: # result.chunks is empty
         outcome = "usable_evidence"
     elif ignored_count:
