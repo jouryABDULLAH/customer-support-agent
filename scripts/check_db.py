@@ -1,4 +1,4 @@
-"""Phase 2 gate checks for the application database. Uses a scratch DB file.
+"""checks for the application database. Uses a scratch DB file.
 
     python scripts/check_db.py
 
@@ -8,12 +8,13 @@ filtered listing, status update, the CHECK constraint on status, and
 foreign-key enforcement on `customer_id`.
 """
 
+import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
 
 from customer_support.db import customers, tickets
-from customer_support.db.connection import init_db
+from customer_support.db.connection import _MIGRATIONS_DIR, init_db, migrate
 
 failures: list[str] = []
 
