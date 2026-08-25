@@ -1,6 +1,7 @@
 /venv
 /Notes
 /Docs
+/data
 __pycache__/
 *.egg-info/
 build/
