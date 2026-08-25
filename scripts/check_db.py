@@ -45,6 +45,24 @@ def main() -> int:
     check("caller-supplied id kept", full_id, "TEST-CUSTOMER-001")
     row = customers.get_customer_by_email(conn, "test-customer-001@example.com")
     check("fetch by email", row["id"], full_id)
+    row = customers.get_customer_by_phone(conn, "0500000000")
+    check("fetch by phone", row["id"], full_id)
+    check("unknown phone is None", customers.get_customer_by_phone(conn, "0000"), None)
+
+    print("\nphone normalization:")
+    check("strips spaces and dashes",
+          customers.normalize_phone("+966 50-000 0000"), "+966500000000")
+    check("00 prefix becomes +",
+          customers.normalize_phone("00966500000000"), "+966500000000")
+    check("already canonical is unchanged",
+          customers.normalize_phone("+966500000000"), "+966500000000")
+    check("local form is left alone",
+          customers.normalize_phone("0500000000"), "0500000000")
+    intl_id = customers.create_customer(conn, phone="+966 55-111 2222")
+    check("stored normalized",
+          customers.get_customer(conn, intl_id)["phone"], "+966551112222")
+    check("found via a differently punctuated form",
+          customers.get_customer_by_phone(conn, "00966 55 111 2222")["id"], intl_id)
     row = customers.get_customer(conn, bare_id)
     check("id-only customer", (row["name"], row["email"], row["phone"]), (None, None, None))
     check("missing customer is None", customers.get_customer(conn, "nope"), None)
@@ -84,9 +102,15 @@ def main() -> int:
         check("UNIQUE rejects duplicate email", "no error", "IntegrityError")
     except sqlite3.IntegrityError:
         check("UNIQUE rejects duplicate email", True, True)
-    # SQLite treats NULLs as distinct, so "no email" is not a duplicate.
+    try:
+        customers.create_customer(conn, phone="0500000000")
+        check("UNIQUE rejects duplicate phone", "no error", "IntegrityError")
+    except sqlite3.IntegrityError:
+        check("UNIQUE rejects duplicate phone", True, True)
+    # SQLite treats NULLs as distinct, so "no email/phone" is not a duplicate.
     customers.create_customer(conn)
-    check("multiple NULL emails allowed", customers.get_customer(conn, bare_id) is not None, True)
+    check("multiple NULL emails/phones allowed",
+          customers.get_customer(conn, bare_id) is not None, True)
     try:
         tickets.update_ticket_status(conn, ticket_id, "GARBAGE")
         check("CHECK rejects bad status", "no error", "IntegrityError")

@@ -5,8 +5,9 @@
 -- deliberately plain TEXT: their taxonomy belongs to the (LLM) draft schema,
 -- which is still under revision, and the DB must not hard-code it.
 
--- `email` is UNIQUE so a lookup by it identifies exactly one customer. SQLite
--- treats NULLs as distinct, so any number of customers may still have no email.
+-- `email` and `phone` are UNIQUE so a lookup by either identifies exactly one
+-- customer. SQLite treats NULLs as distinct, so any number of customers may
+-- still have neither.
 CREATE TABLE IF NOT EXISTS customers (
     id    TEXT PRIMARY KEY,
     name  TEXT,
