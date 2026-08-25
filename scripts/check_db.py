@@ -27,12 +27,45 @@ def check(label: str, actual: object, expected: object) -> None:
         print(f"  FAIL  {label}: expected {expected!r}, got {actual!r}")
 
 
-def main() -> int:
-    scratch = Path(tempfile.mkdtemp()) / "check_app.db"
-    conn = init_db(scratch)
-    init_db(scratch).close()  # idempotent re-init must not fail
+def check_migrations(workdir: Path) -> None:
+    """Stepwise migration behavior, against a scratch DB and a COPY of the
+    real migrations dir -- the real one must never gain temporary files."""
+    migrations = workdir / "migrations"
+    shutil.copytree(_MIGRATIONS_DIR, migrations)
+    db = workdir / "migrate_test.db"
 
-    print("customers:")
+    conn = migrate(db, migrations)
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    check("fresh DB lands on latest version", version, 1)
+    conn.close()
+
+    # A later migration appears: exactly the new one applies.
+    (migrations / "002_add_note.sql").write_text(
+        "ALTER TABLE customers ADD COLUMN note TEXT;", encoding="utf-8"
+    )
+    conn = migrate(db, migrations)
+    check("new migration applies", conn.execute("PRAGMA user_version").fetchone()[0], 2)
+    columns = [r["name"] for r in conn.execute("PRAGMA table_info(customers)")]
+    check("column added by 002", "note" in columns, True)
+    conn.close()
+
+    # Re-running is a no-op (an ALTER re-run would raise 'duplicate column').
+    conn = migrate(db, migrations)
+    check("re-run is a no-op", conn.execute("PRAGMA user_version").fetchone()[0], 2)
+    conn.close()
+
+
+def main() -> int:
+    workdir = Path(tempfile.mkdtemp())
+
+    print("migrations:")
+    check_migrations(workdir)
+
+    scratch = workdir / "check_app.db"
+    conn = init_db(scratch)
+    init_db(scratch).close()  # re-init of an up-to-date DB must not fail
+
+    print("\ncustomers:")
     full_id = customers.create_customer(
         conn,
         name="Test Customer",
@@ -94,7 +127,7 @@ def main() -> int:
           len(tickets.list_tickets(conn, customer_id=full_id, status="OPEN")), 2)
 
     check("update status", tickets.update_ticket_status(conn, ticket_id, "RESOLVED"), True)
-    check("status updated", tickets.get_ticket(conn, ticket_id)["status"], "RESOLVED")
+    check("status updated", tickets.get_ticket(conn, ticket_id)["status"], "RESOLVED") # type: ignore
     check("update missing ticket", tickets.update_ticket_status(conn, "nope", "OPEN"), False)
 
     print("\nconstraints:")
