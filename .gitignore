@@ -2,3 +2,6 @@
 /Notes
 /Docs
 __pycache__/
+*.egg-info/
+build/
+dist/
