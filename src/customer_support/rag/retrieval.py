@@ -93,12 +93,13 @@ def normalize(result: Result) -> RetrievalResult:
         1 for entry in result.diagnostics.trace if entry.relation == IGNORE
     )
 
-    if evidence:
+    if evidence: # result.chunks is empty
         outcome = "usable_evidence"
     elif ignored_count:
-        outcome = "only_ignored"
+        outcome = "only_ignored" # chunks were returned; grader and judged every one unhelpful 
+                                 # zero chunks survived and at least one was dismissed.
     else:
-        outcome = "no_results"
+        outcome = "no_results" # search surfaced nothing (no chunks)
 
     return RetrievalResult(
         outcome=outcome,
