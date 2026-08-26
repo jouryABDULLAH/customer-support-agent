@@ -10,13 +10,17 @@ constructs a `langsmith.Client` and never contacts LangSmith, so enabling it
 here cannot fail on bad credentials. LangChain picks the variables up on its
 own when a model call happens.
 
-Variables (export in the shell; this application reads the process
-environment and never loads a `.env` file):
+Variables (export in the shell, or put in a `.env` in the working directory --
+the shell wins where both define one):
 
     LANGSMITH_TRACING=true      turn tracing on
     LANGSMITH_API_KEY           required for tracing to actually be enabled
     LANGSMITH_PROJECT           optional; defaults to "customer-support-agent"
     LANGSMITH_ENDPOINT          optional; only for EU/self-hosted instances
+
+`.env` support is deliberately scoped to the LangSmith/LANGCHAIN variables
+above: `GROQ_API_KEY` and the application variables stay shell-only, so a
+`.env` cannot quietly override how the application itself runs.
 
 If tracing is requested but no API key is present, tracing is forced OFF with
 a warning and the application continues normally.
@@ -25,11 +29,55 @@ a warning and the application continues normally.
 import logging
 import os
 
+from dotenv import dotenv_values
+
 from customer_support.config import LOG_LEVEL
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_LANGSMITH_PROJECT = "customer-support-agent"
+
+# The only keys `.env` may supply. Everything else in a `.env` -- including
+# GROQ_API_KEY, which is shell-only by decision -- is ignored.
+_DOTENV_KEYS = (
+    "LANGSMITH_TRACING",
+    "LANGSMITH_API_KEY",
+    "LANGSMITH_PROJECT",
+    "LANGSMITH_ENDPOINT",
+    "LANGCHAIN_TRACING_V2",
+    "LANGCHAIN_API_KEY",
+    "LANGCHAIN_PROJECT",
+    "LANGCHAIN_ENDPOINT",
+)
+
+_dotenv_loaded = False
+
+
+def _load_langsmith_dotenv() -> None:
+    """Merge the LangSmith keys from `./.env` into the environment, once.
+
+    Shell always wins: a key already in `os.environ` is never overwritten, so
+    exporting a variable remains the way to override a checked-in default.
+    Reads `.env` from the working directory (scripts run from the repo root).
+    Runs once per process -- the tracing environment is settled at startup,
+    not re-read on every call.
+    """
+    global _dotenv_loaded
+    if _dotenv_loaded:
+        return
+    _dotenv_loaded = True
+
+    values = dotenv_values(".env")
+    if not values:
+        return
+    applied = []
+    for key in _DOTENV_KEYS:
+        value = values.get(key)
+        if value and key not in os.environ:
+            os.environ[key] = value
+            applied.append(key)
+    if applied:
+        logger.info("tracing: loaded %s from .env (shell values win).", ", ".join(applied))
 
 # "OFF" is this project's addition, not a stdlib level -- configure_logging()
 # handles it separately via logging.disable() rather than a numeric level.
@@ -102,6 +150,7 @@ def configure_tracing() -> bool:
     the environment LangChain reads. Missing credentials therefore cannot
     break anything: tracing is forced off and the application runs normally.
     """
+    _load_langsmith_dotenv()
     if not _tracing_requested():
         logger.info("tracing: disabled (LANGSMITH_TRACING is not set).")
         return False
@@ -120,10 +169,15 @@ def configure_tracing() -> bool:
         return False
 
     os.environ["LANGSMITH_TRACING"] = "true"
-    project = os.environ.get("LANGSMITH_PROJECT") or os.environ.get("LANGCHAIN_PROJECT")
+    # .strip(): a shell-exported project name can carry a trailing newline
+    # (observed live: 'spreadsheet agent\n'), which LangSmith treats as a
+    # distinct project.
+    project = (
+        os.environ.get("LANGSMITH_PROJECT") or os.environ.get("LANGCHAIN_PROJECT") or ""
+    ).strip()
     if not project:
         project = DEFAULT_LANGSMITH_PROJECT
-        os.environ["LANGSMITH_PROJECT"] = project
+    os.environ["LANGSMITH_PROJECT"] = project
     _clear_langsmith_env_cache()
 
     endpoint = os.environ.get("LANGSMITH_ENDPOINT") or os.environ.get("LANGCHAIN_ENDPOINT")

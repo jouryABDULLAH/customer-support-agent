@@ -12,6 +12,8 @@ key is present -- never by contacting LangSmith. langsmith caches env reads
 import io
 import logging
 import os
+import tempfile
+from pathlib import Path
 
 from langsmith import utils as ls_utils
 
@@ -47,8 +49,52 @@ def set_env(**values: str) -> None:
     ls_utils.get_env_var.cache_clear()
 
 
+def check_dotenv(workdir: str) -> None:
+    """`.env` supplies LangSmith keys, the shell wins, and nothing else loads.
+
+    Runs in a scratch working directory with a crafted `.env`, resetting the
+    loader's once-per-process flag before each call -- the flag exists so the
+    application settles its environment once; the check needs each call to
+    re-read the file.
+    """
+    from customer_support import observability
+
+    (Path(workdir) / ".env").write_text(
+        "LANGSMITH_TRACING=true\n"
+        "LANGSMITH_API_KEY=lsv2_from_dotenv\n"
+        "GROQ_API_KEY=groq-from-dotenv\n",
+        encoding="utf-8",
+    )
+    saved_groq = os.environ.get("GROQ_API_KEY")
+    cwd = os.getcwd()
+    os.chdir(workdir)
+    try:
+        set_env()
+        observability._dotenv_loaded = False
+        check("tracing enabled purely from .env", configure_tracing(), True)
+        check("key came from .env", os.environ["LANGSMITH_API_KEY"], "lsv2_from_dotenv")
+        check(
+            "GROQ_API_KEY in .env is ignored",
+            os.environ.get("GROQ_API_KEY"), saved_groq,
+        )
+
+        # The shell's value survives the merge: TRACING=false in the shell
+        # beats TRACING=true in the file, so tracing stays off.
+        set_env(LANGSMITH_TRACING="false")
+        observability._dotenv_loaded = False
+        check("shell value beats .env", configure_tracing(), False)
+    finally:
+        os.chdir(cwd)
+        observability._dotenv_loaded = True  # hermetic for the rest of the run
+
+
 def main() -> int:
+    from customer_support import observability
+
     saved = {name: os.environ.get(name) for name in _TRACING_VARS}
+    # Every scenario below tests pure process-environment behavior; a real
+    # `.env` in the repo must not leak into them.
+    observability._dotenv_loaded = True
     try:
         print("logging:")
         stream = io.StringIO()
@@ -104,6 +150,9 @@ def main() -> int:
         )
         check("returns enabled", configure_tracing(), True)
         check("project kept", os.environ["LANGSMITH_PROJECT"], "my-project")
+
+        print("\n.env fallback for LangSmith variables:")
+        check_dotenv(tempfile.mkdtemp())
 
         print("\napplication still runs with tracing requested and no key:")
         set_env(LANGSMITH_TRACING="true")
