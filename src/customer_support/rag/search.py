@@ -13,6 +13,8 @@ signal separating the two.
 import logging
 from typing import Literal
 
+from langsmith import traceable
+
 from customer_support.config import RAG_CONFIDENCE_THRESHOLD
 from customer_support.rag.schema import (
     EvidenceItem,
@@ -38,8 +40,17 @@ def _source(passage) -> str | None:
     return passage.document_name
 
 
+@traceable(name="search_question")
 def search_question(question: str, threshold: float | None = None) -> SubQuestionResult:
-    """Search one subquestion exactly once and score the result."""
+    """Search one subquestion exactly once and score the result.
+
+    `@traceable` gives each subquestion its own span in LangSmith -- without
+    it the graph's `search_subquestions` node is one opaque block covering the
+    whole retrieval (~86s of a 90s turn in the first live trace), with no way
+    to see which question the time went to. A no-op when tracing is off.
+    ragent2's internals (Qdrant query, reranking) stay untraced; splitting
+    those would mean instrumenting ragent2 itself.
+    """
     from customer_support.rag.client import get_documents
 
     passages = get_documents().search(question)
