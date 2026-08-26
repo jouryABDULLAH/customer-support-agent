@@ -10,13 +10,15 @@ Explicit developer operation; nothing calls this on application startup.
 
 import sys
 
-from customer_support.config import DOCS_DIR, configure_logging
+from customer_support.config import DOCS_DIR
+from customer_support.observability import configure_logging, configure_tracing
 from customer_support.rag.client import check_health
 from customer_support.rag.ingestion import ingest_directory
 
 
 def main() -> int:
     configure_logging()
+    configure_tracing()
     docs_dir = sys.argv[1] if len(sys.argv) > 1 else DOCS_DIR
 
     report = check_health()

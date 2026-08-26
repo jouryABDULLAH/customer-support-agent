@@ -11,7 +11,8 @@ documents do not actually answer. Those are where a threshold earns its value;
 an obviously off-topic question separates from anything.
 """
 
-from customer_support.config import RAG_CONFIDENCE_THRESHOLD, configure_logging
+from customer_support.config import RAG_CONFIDENCE_THRESHOLD
+from customer_support.observability import configure_logging
 from customer_support.rag.search import search_question
 
 SUPPORTED_AR = [

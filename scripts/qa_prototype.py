@@ -11,7 +11,8 @@ subquestion cleared the threshold.
 
 import sys
 
-from customer_support.config import RAG_CONFIDENCE_THRESHOLD, configure_logging
+from customer_support.config import RAG_CONFIDENCE_THRESHOLD
+from customer_support.observability import configure_logging, configure_tracing
 from customer_support.rag.answer import generate_answer
 from customer_support.rag.client import get_rag
 from customer_support.rag.decompose import decompose
@@ -60,6 +61,7 @@ def run(message: str, threshold: float, preview_chars: int = 160) -> dict:
 
 def main() -> int:
     configure_logging()
+    configure_tracing()
     args = sys.argv[1:]
     threshold = RAG_CONFIDENCE_THRESHOLD
     if args and args[0] == "--threshold":
