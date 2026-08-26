@@ -12,6 +12,26 @@ APP_DB_PATH = os.environ.get("APP_DB_PATH", "data/app.db")
 # Wall-clock ceiling for one `find()` call. ragent2 defaults to 120s.
 FIND_TIMEOUT_SECONDS = float(os.environ.get("FIND_TIMEOUT_SECONDS", "420"))
 
+# Cross-encoder rerank score at or above which a subquestion's retrieval counts
+# as HIGH confidence. NOT a probability of answer correctness -- just a cutoff
+# separating two observed groups. Re-run scripts/calibrate_threshold.py after
+# any change to the indexed documents.
+#
+# Measured 2026-08-26 over the four MSEGAT documents:
+#   supported (ar)            0.9815 .. 0.9964
+#   supported (en)            0.8705 .. 0.9565
+#   adjacent-unsupported (ar) 0.0378 .. 0.2542   e.g. "ربط مسجات مع Salesforce"
+#   unsupported               0.0002 .. 0.0005
+# Lowest supported 0.8705 vs highest unsupported 0.2542, so anything in
+# (0.2542, 0.8705] separates them. 0.55 sits near the middle of that band,
+# leaving ~0.3 of margin on each side rather than hugging either group.
+#
+# Safe as a single global cutoff only because we never pass `article_number` to
+# search(): that is the sole trigger for ragent2's exact-match anchor path,
+# which returns Qdrant RRF scores on a different scale (`is_anchor=True`).
+# Every score we see is a bge-reranker score.
+RAG_CONFIDENCE_THRESHOLD = float(os.environ.get("RAG_CONFIDENCE_THRESHOLD", "0.55"))
+
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 # "OFF" is this project's addition, not a stdlib level -- configure_logging()
