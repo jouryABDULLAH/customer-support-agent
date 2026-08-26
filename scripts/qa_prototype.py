@@ -1,9 +1,9 @@
-"""End-to-end Phase 3 prototype: decompose -> search -> confidence -> answer.
+"""End-to-end prototype: decompose -> search -> confidence -> answer.
 
     python scripts/qa_prototype.py "How do I subscribe and what does it cost?"
     python scripts/qa_prototype.py --threshold 0.4 "..."
 
-Prints every diagnostic the phase requires: the original message, the extracted
+Prints the following diagnostics: the original message, the extracted
 subquestions, the evidence and top reranker score per subquestion, each
 confidence verdict, the aggregate outcome, and the grounded answer when every
 subquestion cleared the threshold.
