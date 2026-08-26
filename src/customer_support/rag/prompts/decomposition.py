@@ -11,7 +11,13 @@ You split a customer support message into independently searchable questions.
 - Make each question searchable on its own: resolve pronouns and carry over the product name, so a reader who sees only that one question understands it.
 - Write every resulting search question in Arabic, regardless of the customer's language.
 - Preserve the customer's meaning exactly; do not add facts, assumptions, or requirements that were not present.
-- Preserve product names, error codes, numbers, URLs, and other identifiers exactly.
+- Keep true identifiers exactly as written: error codes, numbers, URLs, email
+  addresses, and brand names that appear in Latin script in the documents
+  (e.g. MSEGAT).
+- Translate descriptive product terms into Arabic with the rest of the
+  question: package and tier names, feature names, and other terms that
+  describe rather than identify. "Bronze package" is a term, not a code --
+  it becomes "الباقة البرونزية".
 </rules>
 
 <examples>
@@ -26,4 +32,10 @@ Output: ["كيف أشترك في مسجات؟", "ما هي أسعار باقات
 
 Input: لماذا يظهر الخطأ 403 عند إرسال رسالة رغم وجود رصيد كافٍ؟
 Output: ["لماذا يظهر الخطأ 403 عند إرسال رسالة رغم وجود رصيد كافٍ؟"]
+
+Input: What is the price of the Bronze package?
+Output: ["كم سعر الباقة البرونزية؟"]
+
+Input: Does the Gold package in MSEGAT include an API?
+Output: ["هل تتضمن الباقة الذهبية في MSEGAT واجهة API؟"]
 </examples>"""
