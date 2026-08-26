@@ -2,21 +2,21 @@
 
     ragent2 up
     python scripts/ingest_docs.py [docs_dir]
+    LOG_LEVEL=OFF python scripts/ingest_docs.py   # silent
+    LOG_LEVEL=DEBUG python scripts/ingest_docs.py # verbose
 
 Explicit developer operation; nothing calls this on application startup.
 """
 
-import logging
 import sys
-from customer_support.config import DOCS_DIR
+
+from customer_support.config import DOCS_DIR, configure_logging
 from customer_support.rag.client import check_health
 from customer_support.rag.ingestion import ingest_directory
 
 
 def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)s: %(message)s"
-    )
+    configure_logging()
     docs_dir = sys.argv[1] if len(sys.argv) > 1 else DOCS_DIR
 
     report = check_health()

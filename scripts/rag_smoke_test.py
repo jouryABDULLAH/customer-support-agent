@@ -9,10 +9,10 @@ the runtime contract is recorded rather than assumed) and the `RetrievalResult`
 this application normalizes it into.
 """
 
-import logging
 import sys
 from dataclasses import fields, is_dataclass
 
+from customer_support.config import configure_logging
 from customer_support.rag.client import get_documents
 from customer_support.rag.retrieval import normalize
 
@@ -62,7 +62,7 @@ def run(query: str, label: str) -> None:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(name)s: %(message)s")
+    configure_logging()
 
     documents = get_documents()
     indexed = documents.list()
