@@ -1,6 +1,7 @@
 """Per-subquestion retrieval over RAGent2 `search()`.
 
-one `search()` call per subquestion.
+one `search()` call per subquestion. The shapes it returns are defined in
+`rag/schema.py`.
 
 Confidence comes from the cross-encoder rerank score of the best passage,
 compared against a configured threshold. `search()` applies no threshold of its
@@ -10,34 +11,16 @@ signal separating the two.
 """
 
 import logging
-from typing import Literal, TypedDict
+from typing import Literal
 
 from customer_support.config import RAG_CONFIDENCE_THRESHOLD
+from customer_support.rag.schema import (
+    EvidenceItem,
+    RetrievalResult,
+    SubQuestionResult,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class EvidenceItem(TypedDict):
-    """One retrieved passage.
-
-    `score` is the cross-encoder rerank score, which is what stands in for that judgment.
-    """
-
-    content: str
-    score: float
-    source: str | None
-
-
-class SubQuestionResult(TypedDict):
-    question: str
-    evidence: list[EvidenceItem]
-    top_score: float | None
-    confidence: Literal["high", "low"]
-
-
-class RetrievalResult(TypedDict):
-    results: list[SubQuestionResult]
-    outcome: Literal["all_high", "needs_escalation"]
 
 
 def confidence_for(top_score: float | None, threshold: float | None = None) -> Literal["high", "low"]:

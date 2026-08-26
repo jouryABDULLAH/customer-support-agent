@@ -10,7 +10,8 @@ import re
 
 from ragent2.llm.client import build_llm
 
-from customer_support.rag.search import RetrievalResult
+from customer_support.rag.prompts import GROUNDED_ANSWER_PROMPT
+from customer_support.rag.schema import RetrievalResult
 
 logger = logging.getLogger(__name__)
 
@@ -28,25 +29,6 @@ def detect_language(message: str) -> str:
     name) is Arabic, which is the common real case.
     """
     return "ar" if _ARABIC.search(message) else "en"
-
-_PROMPT = """\
-You are a customer support agent. Answer the customer using ONLY the evidence
-passages provided.
-
-<rules>
-- Use only the evidence. If it does not state something, do not say it.
-- Never add prices, timeframes, conditions, codes or steps that are not in the
-  evidence -- not from your own knowledge, and not by inference.
-- Cover every question that was asked, in one coherent reply. Do not label it
-  with headings like "Question 1" unless the customer numbered them.
-- Write your ENTIRE reply in the language named in REPLY LANGUAGE below,
-  including every heading and label. The evidence is often in a different
-  language from the customer -- translate the facts into the reply language.
-  Never mirror the evidence's language instead of the customer's.
-  Keep product names, URLs, emails and error codes exactly as written.
-- Be direct and concise. No preamble about what you were given.
-</rules>"""
-
 
 def _evidence_block(retrieval: RetrievalResult) -> str:
     """Render the per-subquestion evidence the model is allowed to use."""
@@ -86,7 +68,7 @@ def generate_answer(message: str, retrieval: RetrievalResult, settings) -> str:
     llm = build_llm(settings.answer_model, settings.answer_temperature, settings=settings)
     response = llm.invoke(
         [
-            {"role": "system", "content": _PROMPT},
+            {"role": "system", "content": GROUNDED_ANSWER_PROMPT},
             {
                 "role": "user",
                 "content": (
