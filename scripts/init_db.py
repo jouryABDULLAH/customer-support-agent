@@ -13,14 +13,14 @@ from customer_support.db.connection import init_db
 
 def main() -> int:
     db_path = sys.argv[1] if len(sys.argv) > 1 else APP_DB_PATH
-    conn = init_db(db_path)
-    tables = [
+    conn = init_db(db_path) # initialize
+    tables = [ # print
         row["name"]
         for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
         )
     ]
-    conn.close()
+    conn.close() # close
     print(f"Initialized {db_path} with tables: {', '.join(tables)}")
     return 0
 
