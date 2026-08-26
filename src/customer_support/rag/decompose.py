@@ -8,8 +8,7 @@ begins, which is a judgment about the customer's *intent* that a splitter on
 
 import logging
 
-from ragent2.llm.client import invoke_structured
-
+from customer_support.model import invoke_structured
 from customer_support.rag.prompts import DECOMPOSE_QUESTIONS_PROMPT
 from customer_support.rag.schema import QuestionDecomposition
 
@@ -28,10 +27,7 @@ def decompose(message: str, settings) -> list[str]:
             {"role": "system", "content": DECOMPOSE_QUESTIONS_PROMPT},
             {"role": "user", "content": f"Input: {message}"},
         ],
-        model=settings.answer_model,
         settings=settings,
-        temperature=0.0,
-        max_tokens=settings.metadata_max_output_tokens,
     )
     questions = [q.strip() for q in result.questions if q.strip()]
     if not questions:

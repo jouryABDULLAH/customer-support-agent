@@ -8,8 +8,7 @@ the whole point of the threshold is that this prompt never has to guess.
 import logging
 import re
 
-from ragent2.llm.client import build_llm
-
+from customer_support.model import build_model
 from customer_support.rag.prompts import GROUNDED_ANSWER_PROMPT
 from customer_support.rag.schema import RetrievalResult
 
@@ -65,7 +64,7 @@ def generate_answer(message: str, retrieval: RetrievalResult, settings) -> str:
     language = detect_language(message)
     language_name = "Arabic" if language == "ar" else "English"
 
-    llm = build_llm(settings.answer_model, settings.answer_temperature, settings=settings)
+    llm = build_model(settings=settings)
     response = llm.invoke(
         [
             {"role": "system", "content": GROUNDED_ANSWER_PROMPT},
