@@ -8,6 +8,14 @@ DOCS_DIR = os.environ.get("DOCS_DIR", "Docs")
 
 APP_DB_PATH = os.environ.get("APP_DB_PATH", "data/app.db")
 
+# LangGraph thread checkpoints. Deliberately a separate file from APP_DB_PATH:
+# the checkpointer owns its schema and rewrites it on library upgrades, and
+# application rows must never be collateral in that.
+CHECKPOINT_DB_PATH = os.environ.get("CHECKPOINT_DB_PATH", "data/checkpoints.db")
+
+# The only product this deployment answers for currently.
+TICKET_PRODUCT = "MSEGAT"
+
 # Wall-clock ceiling for one `find()` call. ragent2 defaults to 120s.
 FIND_TIMEOUT_SECONDS = float(os.environ.get("FIND_TIMEOUT_SECONDS", "420"))
 
@@ -33,6 +41,16 @@ RAG_CONFIDENCE_THRESHOLD = float(os.environ.get("RAG_CONFIDENCE_THRESHOLD", "0.5
 
 # Consumed by `observability.configure_logging()`, the central logging setup.
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+# Whether `deliver_answer` strips the model's citation markers (e.g. 【1†L1-L3】)
+# before the reply reaches the customer. OFF by default: during development the
+# markers show which evidence passage each claim leaned on, which is worth more
+# than polish. Flip on for a customer-facing deployment:
+#   $env:STRIP_CITATION_MARKERS = "true"
+STRIP_CITATION_MARKERS = (
+    os.environ.get("STRIP_CITATION_MARKERS", "false").strip().lower()
+    in ("true", "1", "yes")
+)
 
 
 def groq_api_key() -> str:

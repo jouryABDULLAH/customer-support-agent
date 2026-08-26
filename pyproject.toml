@@ -8,13 +8,27 @@ version = "0.1.0"
 description = "Grounded customer-support agent over RAGent2 retrieval."
 requires-python = ">=3.12"
 
-# Deliberately empty. 
+# Only what this project needs on top of the environment ragent2 already
+# builds. ragent2 is installed separately (it is a private package, not on an
+# index) and brings langgraph, langchain-core, langchain-groq, langsmith and
+# pydantic with it, so listing those here would only invite a resolver to
+# disagree with the version ragent2 pinned.
+#
+# langgraph-checkpoint-sqlite is the exception: langgraph does not bundle
+# SqliteSaver, and nothing else pulls it in, so a fresh clone fails at
+# `graph/checkpoint.py` without it.
+#
+# The usual install stays
 #
 #     pip install -e . --no-deps
 #
 # which registers `customer_support` as importable without touching anything
-# already installed.
-dependencies = []
+# already installed -- but that skips the line below, so install it yourself:
+#
+#     pip install langgraph-checkpoint-sqlite
+dependencies = [
+    "langgraph-checkpoint-sqlite>=3.1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
