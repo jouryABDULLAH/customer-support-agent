@@ -29,8 +29,15 @@ def detect_language(message: str) -> str:
     """
     return "ar" if _ARABIC.search(message) else "en"
 
-def _evidence_block(retrieval: RetrievalResult) -> str:
-    """Render the per-subquestion evidence the model is allowed to use."""
+def evidence_block(retrieval: RetrievalResult) -> str:
+    """Render the per-subquestion evidence, grouped by the question it answers.
+
+    Shared by the answering prompt and the grounding verifier so both judge
+    the same text laid out the same way -- a verifier shown a different
+    rendering than the author is checking a different thing. Grouping is what
+    stops evidence retrieved for one question being used to invent an answer
+    to another.
+    """
     blocks: list[str] = []
     for result in retrieval["results"]:
         passages = [
@@ -44,8 +51,16 @@ def _evidence_block(retrieval: RetrievalResult) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-def generate_answer(message: str, retrieval: RetrievalResult, settings) -> str:
-    """Answer `message` from `retrieval`'s evidence, in the customer's language.
+def generate_answer(
+    message: str, retrieval: RetrievalResult, settings, language: str
+) -> str:
+    """Answer `message` from `retrieval`'s evidence, in `language`.
+
+    `language` is `"ar"` or `"en"` and is named outright in the prompt rather
+    than inferred. The evidence here is almost entirely Arabic, and asking the
+    model to infer "the customer's language" let that evidence win -- an
+    English question came back answered in Arabic. In the graph the value
+    comes from the router; `detect_language` serves callers without one.
 
     Every retrieved passage is passed, not just the top-scoring few. Reranker
     scores are not reliable *within* a query: asked for package prices, the
@@ -61,7 +76,6 @@ def generate_answer(message: str, retrieval: RetrievalResult, settings) -> str:
             f"{retrieval['outcome']!r}. Low-confidence questions must escalate."
         )
 
-    language = detect_language(message)
     language_name = "Arabic" if language == "ar" else "English"
 
     llm = build_model(settings=settings)
@@ -73,7 +87,7 @@ def generate_answer(message: str, retrieval: RetrievalResult, settings) -> str:
                 "content": (
                     f"REPLY LANGUAGE: {language_name}\n\n"
                     f"Customer's original message:\n{message}\n\n"
-                    f"Evidence:\n\n{_evidence_block(retrieval)}\n\n"
+                    f"Evidence:\n\n{evidence_block(retrieval)}\n\n"
                     f"Write the entire reply in {language_name}."
                 ),
             },

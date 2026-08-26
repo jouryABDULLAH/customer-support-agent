@@ -13,7 +13,7 @@ import sys
 
 from customer_support.config import RAG_CONFIDENCE_THRESHOLD
 from customer_support.observability import configure_logging, configure_tracing
-from customer_support.rag.answer import generate_answer
+from customer_support.rag.answer import detect_language, generate_answer
 from customer_support.rag.client import get_rag
 from customer_support.rag.decompose import decompose
 from customer_support.rag.search import low_confidence_questions, search_questions
@@ -50,7 +50,7 @@ def run(message: str, threshold: float, preview_chars: int = 160) -> dict:
     if retrieval["outcome"] == "all_high":
         print("\nGROUNDED ANSWER")
         print("-" * 78)
-        print(generate_answer(message, retrieval, settings))
+        print(generate_answer(message, retrieval, settings, detect_language(message)))
     else:
         print("\nNEEDS ESCALATION -- unresolved subquestion(s):")
         for question in low_confidence_questions(retrieval):
