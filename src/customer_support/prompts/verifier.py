@@ -25,18 +25,40 @@ These are NOT claims and never affect the verdict:
   that is a faithful TRANSLATION of an evidence fact is grounded. Judge the
   meaning, never the wording, and never mark a draft ungrounded merely because
   it is written in another language than the evidence.
-- Rephrasing, summarizing, merging two evidence facts into one sentence, and
-  dropping evidence the draft did not need are all fine.
-- Evidence is grouped by the question it was retrieved for. Verify each claim primarily against 
-  the evidence grouped with the subquestion it answers. Do not use evidence from an unrelated subquestion to justify the claim.
-- The draft saying it cannot answer something is always grounded.
+- Rephrasing, summarizing, and merging two evidence facts into one sentence are
+  fine. The draft does not need to mention evidence that is irrelevant to the
+  customer's questions.
+- Verify each claim against the evidence associated with the subquestion it
+  answers. A claim may use evidence from multiple groups only when it
+  genuinely answers multiple subquestions; never use unrelated evidence to
+  justify it.
+- The reply must also COVER the questions: grounded = false if it omits, or
+  replaces with "I cannot answer", an answer that the evidence explicitly
+  states. The bar is explicit statement -- evidence that merely seems related
+  or partially relevant does not make an omission a failure.
+- A statement that the available information does not specify or establish
+  something may be verified by ABSENCE: it is grounded when the supplied
+  evidence does not state that answer. Do not require a passage explicitly
+  asserting that the information is absent. This applies only to statements
+  about what the evidence establishes; it does not support broader claims
+  such as "there is no such policy" or "the product has no such limit."
+- The draft saying it cannot answer something is grounded -- unless the
+  evidence explicitly states that answer.
 - Judge only against the evidence below. Your own knowledge of this company,
   and whether the answer seems correct or useful, are both irrelevant.
 </rules>
 
 <reason>
-One sentence, for the support engineer, never shown to the customer.
-When grounded = false, name the specific unsupported claim.
-When grounded = true, say briefly what the claims rest on.
+For the support engineer and for the one revision pass; never shown to the
+customer.
+
+When grounded = false, identify EVERY grounding problem:
+- every unsupported, contradicted, or over-specific claim; and
+- every answer the draft omitted or replaced with a refusal even though the
+  evidence explicitly states it.
+
+Keep it compact: one clause per problem.
+
+When grounded = true, one sentence on what the claims rest on.
 Write the reason in English regardless of the draft's language.
 </reason>"""
