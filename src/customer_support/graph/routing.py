@@ -9,6 +9,7 @@ takes the same path it took live.
 import logging
 from typing import Literal
 
+from customer_support.config import MAX_ANSWER_REVISIONS
 from customer_support.graph.state import State
 
 logger = logging.getLogger(__name__)
@@ -39,15 +40,30 @@ def route_after_retrieval(state: State) -> Literal["generate_answer", "ticket_ag
     return "ticket_agent"
 
 
-def route_after_verification(state: State) -> Literal["deliver_answer", "ticket_agent"]:
-    """Send the draft only if the verifier passed it.
+def route_after_verification(
+    state: State,
+) -> Literal["deliver_answer", "revise_answer", "ticket_agent"]:
+    """Deliver a passed draft; revise a failed one once; then ticket.
 
-    A failed verdict discards the draft rather than repairing it. What the
-    verifier found is not a wording problem -- it is a claim the evidence does
-    not support, so there is nothing to send and a human has to answer.
+    A failed verdict is a claim the evidence does not support, but the
+    verifier's reason names it, so one bounded correction attempt
+    (`MAX_ANSWER_REVISIONS`) gets to remove it before a human has to answer.
+    The revised draft comes back through `verify`; a second failure files the
+    ticket. The failed draft itself is never delivered.
+
+    Revision requires an explicit verifier failure (`grounded=False`): a
+    missing verdict means verification did not record a result, and the
+    fail-safe for that is escalation, not a revision pass working from no
+    reason.
     """
     grounding = state.get("grounding")
-    if grounding and grounding["grounded"]:
+    if grounding is None:
+        logger.info("no verification verdict; escalating to a ticket.")
+        return "ticket_agent"
+    if grounding["grounded"]:
         return "deliver_answer"
-    logger.info("verification failed; escalating to a ticket.")
+    if state.get("answer_revision_count", 0) < MAX_ANSWER_REVISIONS:
+        logger.info("verification failed; attempting one revision.")
+        return "revise_answer"
+    logger.info("verification failed after revision; escalating to a ticket.")
     return "ticket_agent"

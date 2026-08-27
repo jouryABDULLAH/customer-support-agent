@@ -44,6 +44,10 @@ class State(MessagesState):
         answer_draft: The grounded answer before verification. Becomes
             `final_response` only if `grounding["grounded"]` is true.
         grounding: The verifier's verdict on `answer_draft`.
+        answer_revision_count: How many times this turn's draft has been
+            revised after a failed verdict. Absent means 0 -- read it as
+            `state.get("answer_revision_count", 0)`. Incremented only by
+            `revise_answer`; never reset by `generate_answer`.
         ticket_draft: The ticket agent's three reasoned fields, before
             `create_ticket` adds the trusted ones.
         ticket_id: The ticket created this turn, or `None` if none was.
@@ -63,6 +67,7 @@ class State(MessagesState):
     retrieval: NotRequired[RetrievalResult | None]
     answer_draft: NotRequired[str | None]
     grounding: NotRequired[GroundingState | None]
+    answer_revision_count: NotRequired[int]
 
     ticket_draft: NotRequired[TicketDraftState | None]
     ticket_id: NotRequired[str | None]

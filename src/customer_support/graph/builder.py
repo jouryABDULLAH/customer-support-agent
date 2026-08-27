@@ -12,7 +12,9 @@ changes.
          '- decompose_question -> search_subquestions           |
               |- (all_high)      generate_answer -> verify      |
               |                     |- (grounded) deliver_answer|
-              |                     '- (not)  ---.              |
+              |                     |- (fail, 1st) revise_answer|
+              |                     |       '-> verify (again)  |
+              |                     '- (fail, again) --.        |
               '- (needs_escalation) ------------ ticket_agent   |
                                                  -> create_ticket
       -> finalize_turn -> END
@@ -43,6 +45,7 @@ def build_graph(checkpointer=None):
     builder.add_node("search_subquestions", nodes.search_subquestions)
     builder.add_node("generate_answer", nodes.generate_answer_node)
     builder.add_node("verify", nodes.verify)
+    builder.add_node("revise_answer", nodes.revise_answer_node)
     builder.add_node("deliver_answer", nodes.deliver_answer)
     builder.add_node("ticket_agent", nodes.ticket_agent)
     builder.add_node("create_ticket", nodes.create_ticket)
@@ -69,8 +72,9 @@ def build_graph(checkpointer=None):
     builder.add_conditional_edges(
         "verify",
         routing.route_after_verification,
-        ["deliver_answer", "ticket_agent"],
+        ["deliver_answer", "revise_answer", "ticket_agent"],
     )
+    builder.add_edge("revise_answer", "verify")
     builder.add_edge("deliver_answer", "finalize_turn")
 
     builder.add_edge("ticket_agent", "create_ticket")

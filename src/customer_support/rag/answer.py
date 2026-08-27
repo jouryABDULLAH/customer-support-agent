@@ -9,7 +9,7 @@ import logging
 import re
 
 from customer_support.model import build_model
-from customer_support.rag.prompts import GROUNDED_ANSWER_PROMPT
+from customer_support.rag.prompts import GROUNDED_ANSWER_PROMPT, REVISE_ANSWER_PROMPT
 from customer_support.rag.schema import RetrievalResult
 
 logger = logging.getLogger(__name__)
@@ -99,3 +99,51 @@ def generate_answer(
         len(answer), language, len(retrieval["results"]),
     )
     return answer
+
+
+def revise_answer(
+    message: str,
+    retrieval: RetrievalResult,
+    draft: str,
+    reason: str,
+    settings,
+    language: str,
+) -> str:
+    """Correct a draft that failed grounding verification.
+
+    The same shared rules as `generate_answer`. Only the task differs: `reason` (the verifier's finding)
+    names the unsupported claims, and the prompt confines the change to them.
+    The result goes back through verification; this function does not decide
+    whether the correction succeeded.
+    """
+    if retrieval["outcome"] != "all_high":
+        raise ValueError(
+            "revise_answer requires outcome 'all_high'; got "
+            f"{retrieval['outcome']!r}. Low-confidence questions must escalate."
+        )
+
+    language_name = "Arabic" if language == "ar" else "English"
+
+    llm = build_model(settings=settings)
+    response = llm.invoke(
+        [
+            {"role": "system", "content": REVISE_ANSWER_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"REPLY LANGUAGE: {language_name}\n\n"
+                    f"Customer's original message:\n{message}\n\n"
+                    f"Evidence:\n\n{evidence_block(retrieval)}\n\n"
+                    f"Previous draft:\n{draft}\n\n"
+                    f"Reviewer's reason it is not grounded:\n{reason}\n\n"
+                    f"Write the full corrected reply in {language_name}."
+                ),
+            },
+        ]
+    )
+    revised = str(response.content).strip()
+    logger.info(
+        "answer: revised %d -> %d chars in %s (reason: %s)",
+        len(draft), len(revised), language, reason[:120],
+    )
+    return revised

@@ -41,7 +41,7 @@ from customer_support.prompts import (
     TICKET_DRAFT_PROMPT,
     VERIFY_GROUNDING_PROMPT,
 )
-from customer_support.rag.answer import evidence_block, generate_answer
+from customer_support.rag.answer import evidence_block, generate_answer, revise_answer
 from customer_support.rag.client import get_rag
 from customer_support.rag.decompose import decompose
 from customer_support.rag.schema import EvidenceItem
@@ -217,6 +217,28 @@ def generate_answer_node(state: State) -> dict:
     return {"answer_draft": draft}
 
 
+def revise_answer_node(state: State) -> dict:
+    """Correct the draft using the verifier's reason, then re-verify.
+
+    Runs at most `MAX_ANSWER_REVISIONS` times per turn -- the routing after
+    `verify` counts `answer_revision_count`, which this node increments only
+    when it actually produces a revision. The failed draft is never appended
+    to `messages`; only `deliver_answer` publishes an answer.
+    """
+    grounding = state.get("grounding") or {}
+    revised = revise_answer(
+        _customer_message(state),
+        state["retrieval"],
+        state["answer_draft"] or "",
+        grounding.get("reason", "unknown"),
+        _settings(),
+        _language(state),
+    )
+    count = state.get("answer_revision_count", 0) + 1
+    logger.info("revision %d: draft revised, re-verifying", count)
+    return {"answer_draft": revised, "answer_revision_count": count}
+
+
 def verify(state: State) -> dict:
     """Check every factual claim in the draft against the evidence.
 
@@ -298,9 +320,14 @@ def _unresolved_notes(state: State) -> str:
         return notes
 
     reason = grounding["reason"] if grounding else "unknown"
+    revisions = state.get("answer_revision_count", 0)
+    attempted = (
+        f" A corrected draft was attempted {revisions} time(s) and still "
+        "failed." if revisions else ""
+    )
     return (
         "Evidence was found and an answer was drafted, but it failed grounding "
-        f"verification and was discarded. Verifier reason: {reason}"
+        f"verification and was discarded.{attempted} Verifier reason: {reason}"
     )
 
 
@@ -393,5 +420,6 @@ def finalize_turn(state: State) -> dict:
         "retrieval": None,
         "answer_draft": None,
         "grounding": None,
+        "answer_revision_count": 0,
         "ticket_draft": None,
     }
