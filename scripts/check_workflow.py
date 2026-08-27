@@ -24,6 +24,7 @@ from customer_support.graph.nodes import (
     finalize_turn,
     load_customer_if_needed,
 )
+from customer_support.graph import routing as routing_module
 from customer_support.graph.routing import (
     route_after_retrieval,
     route_after_router,
@@ -46,7 +47,9 @@ EXPECTED_EDGES = {
     ("search_subquestions", "ticket_agent"),
     ("generate_answer", "verify"),
     ("verify", "deliver_answer"),
+    ("verify", "revise_answer"),
     ("verify", "ticket_agent"),
+    ("revise_answer", "verify"),
     ("deliver_answer", "finalize_turn"),
     ("ticket_agent", "create_ticket"),
     ("create_ticket", "finalize_turn"),
@@ -102,8 +105,8 @@ def check_structure() -> None:
     for name in (
         "load_customer_if_needed", "router", "respond_directly",
         "decompose_question", "search_subquestions", "generate_answer",
-        "verify", "deliver_answer", "ticket_agent", "create_ticket",
-        "finalize_turn",
+        "verify", "revise_answer", "deliver_answer", "ticket_agent",
+        "create_ticket", "finalize_turn",
     ):
         check(f"node {name!r} registered", name in nodes, True)
 
@@ -119,6 +122,7 @@ def check_structure() -> None:
             ("search_subquestions", "generate_answer"),
             ("search_subquestions", "ticket_agent"),
             ("verify", "deliver_answer"),
+            ("verify", "revise_answer"),
             ("verify", "ticket_agent"),
         },
     )
@@ -163,13 +167,42 @@ def check_routing() -> None:
         "deliver_answer",
     )
     check(
-        "ungrounded -> ticket_agent",
+        "first failure -> revise_answer",
         route_after_verification({"grounding": {"grounded": False, "reason": "no"}}),
+        "revise_answer",
+    )
+    check(
+        "failure after revision -> ticket_agent",
+        route_after_verification(
+            {"grounding": {"grounded": False, "reason": "no"}, "answer_revision_count": 1}
+        ),
         "ticket_agent",
     )
     check(
-        "missing verdict -> ticket_agent",
+        "grounded after revision -> deliver_answer",
+        route_after_verification(
+            {"grounding": {"grounded": True, "reason": "ok"}, "answer_revision_count": 1}
+        ),
+        "deliver_answer",
+    )
+    saved_max = routing_module.MAX_ANSWER_REVISIONS
+    try:
+        routing_module.MAX_ANSWER_REVISIONS = 0
+        check(
+            "MAX=0 disables revision entirely",
+            route_after_verification({"grounding": {"grounded": False, "reason": "no"}}),
+            "ticket_agent",
+        )
+    finally:
+        routing_module.MAX_ANSWER_REVISIONS = saved_max
+    check(
+        "missing verdict -> ticket_agent, never revision",
         route_after_verification({}),
+        "ticket_agent",
+    )
+    check(
+        "verdict cleared to None -> ticket_agent too",
+        route_after_verification({"grounding": None}),
         "ticket_agent",
     )
 
@@ -226,6 +259,7 @@ def check_finalize_turn() -> None:
             "retrieval": retrieval(("a", "high"), ("b", "high")),
             "answer_draft": "draft",
             "grounding": {"grounded": True, "reason": "ok"},
+            "answer_revision_count": 1,
             "ticket_draft": None,
             "ticket_id": "STALE-TICKET",
             "final_response": "answer",
@@ -236,6 +270,7 @@ def check_finalize_turn() -> None:
         "answer_draft", "grounding", "ticket_draft",
     ):
         check(f"clears {field}", answered[field], None)
+    check("clears answer_revision_count to 0", answered["answer_revision_count"], 0)
     check("publishes evidence for the UI", len(answered["response_evidence"]), 2)
     check(
         "drops a ticket id from an earlier turn",

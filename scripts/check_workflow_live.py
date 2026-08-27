@@ -233,6 +233,22 @@ def scenario_e() -> None:
     print(f"  translation    -> grounded={translated.grounded}: {translated.reason}")
     check("a faithful translation is not rejected", translated.grounded, True)
 
+    # The reason feeds the single revision pass: a claim it does not name
+    # survives revision unfixed.
+    multi = verdict(
+        "Refunds are allowed within 14 days, are processed within 3 business "
+        "days, and include a lifetime guarantee.",
+        "QUESTION: refund policy\nEVIDENCE:\n  [1] (source: policy)\n  Refunds are allowed within 14 days.",
+    )
+    print(f"  two claims     -> grounded={multi.grounded}: {multi.reason}")
+    check("two invented claims are caught", multi.grounded, False)
+    reason = multi.reason.lower()
+    check(
+        "the reason names BOTH claims, not just the first",
+        "business day" in reason and "guarantee" in reason,
+        True,
+    )
+
     # Two groups whose facts are individually true and wrong about each other.
     # A verifier that pools all evidence into one bucket passes the borrowed
     # claim, because "3 business days" really is in front of it -- just under
@@ -258,33 +274,113 @@ def scenario_e() -> None:
     print(f"  each own group -> grounded={own_groups.grounded}: {own_groups.reason}")
     check("each claim against its own group still passes", own_groups.grounded, True)
 
+    # Coverage: the evidence explicitly answers both questions; a draft that
+    # silently drops one is the deletion escape hatch a revision pass could
+    # exploit to get past pure grounding.
+    omitted = verdict("Refunds are allowed within 14 days.", two_groups)
+    print(f"  omitted answer -> grounded={omitted.grounded}: {omitted.reason}")
+    check(
+        "omitting an explicitly stated answer fails coverage",
+        omitted.grounded,
+        False,
+    )
+
+    # Counter-probe: coverage must not over-trigger. Here the delivery-time
+    # evidence does NOT state the answer, so saying so is honest and grounded.
+    unanswerable = verdict(
+        "Refunds are allowed within 14 days. The available information does "
+        "not specify delivery times.",
+        "QUESTION: refund policy\n"
+        "EVIDENCE:\n  [1] (source: policy)\n  Refunds are allowed within 14 days."
+        "\n\n---\n\n"
+        "QUESTION: delivery time\n"
+        "EVIDENCE:\n  [1] (source: logistics)\n  Orders can be tracked from the customer portal.",
+    )
+    print(f"  honest cannot  -> grounded={unanswerable.grounded}: {unanswerable.reason}")
+    check(
+        "cannot-answer stays grounded when evidence lacks the answer",
+        unanswerable.grounded,
+        True,
+    )
+
+    HALLUCINATED = (
+        "The Bronze package costs 148 USD or 549 SAR. It is activated within "
+        "3 business days and comes with a 30-day money-back guarantee."
+    )
+
     def hallucinating_draft(state) -> dict:
         # Two real facts from the documents, then two that are nowhere in
         # them. Written in English against Arabic evidence on purpose, so the
         # graph-level check also exercises cross-language verification.
-        return {
-            "answer_draft": (
-                "The Bronze package costs 148 USD or 549 SAR. It is activated within "
-                "3 business days and comes with a 30-day money-back guarantee."
-            )
-        }
+        return {"answer_draft": HALLUCINATED}
 
-    original = graph_nodes.generate_answer_node
+    # E1 -- rescue: the real revise_answer gets the verifier's reason and the
+    # real evidence; the corrected draft should pass the second verification
+    # and be delivered, with the invented claims gone. No ticket.
+    print("  --- E1: revision rescues the draft ---")
+    original_gen = graph_nodes.generate_answer_node
     graph_nodes.generate_answer_node = hallucinating_draft
     try:
-        state, updates, _ = run_turn("كم سعر الباقة البرونزية؟", f"E-{RUN}")
+        state, updates, _ = run_turn("كم سعر الباقة البرونزية؟", f"E1-{RUN}")
     finally:
-        graph_nodes.generate_answer_node = original
+        graph_nodes.generate_answer_node = original_gen
+
+    print(f"  reply          -> {state['final_response'][:120]}")
+    check("revision ran", "revise_answer" in updates, True)
+    check(
+        "revision incremented the counter",
+        updates.get("revise_answer", {}).get("answer_revision_count"),
+        1,
+    )
+    check(
+        "revised draft passed verification",
+        updates.get("verify", {}).get("grounding", {}).get("grounded"),
+        True,
+    )
+    check("answer delivered after rescue", "deliver_answer" in updates, True)
+    check("no ticket on a rescued turn", state["ticket_id"], None)
+    check(
+        "invented money-back claim removed",
+        "money-back" in state["final_response"],
+        False,
+    )
+    check(
+        "invented 3-day claim removed",
+        "3 business days" in state["final_response"],
+        False,
+    )
+    check("real price kept", "148" in state["final_response"], True)
+
+    # E2 -- still failing: the reviser is also patched to return the same
+    # hallucination, so the second verification fails too and the turn files
+    # a ticket. The subject under test is the second verify + routing.
+    print("  --- E2: revision fails too -> ticket ---")
+
+    def stubborn_reviser(message, retrieval, draft, reason, settings, language):
+        return HALLUCINATED
+
+    original_rev = graph_nodes.revise_answer
+    graph_nodes.generate_answer_node = hallucinating_draft
+    graph_nodes.revise_answer = stubborn_reviser
+    try:
+        state, updates, _ = run_turn("كم سعر الباقة البرونزية؟", f"E2-{RUN}")
+    finally:
+        graph_nodes.generate_answer_node = original_gen
+        graph_nodes.revise_answer = original_rev
 
     print(f"  graph verdict  -> {updates.get('verify', {}).get('grounding', {}).get('reason')}")
     print(f"  reply          -> {state['final_response'][:120]}")
-
     check(
         "retrieval succeeded",
         updates.get("search_subquestions", {}).get("retrieval", {}).get("outcome"),
         "all_high",
     )
-    check("the verifier rejected the draft", updates.get("verify", {}).get("grounding", {}).get("grounded"), False)
+    check("revision was attempted", "revise_answer" in updates, True)
+    check(
+        "the second verdict also failed",
+        updates.get("verify", {}).get("grounding", {}).get("grounded"),
+        False,
+    )
     check("the draft was not delivered", "deliver_answer" in updates, False)
     check("escalated to the ticket agent", "ticket_agent" in updates, True)
     check("a ticket was created", bool(state["ticket_id"]), True)
