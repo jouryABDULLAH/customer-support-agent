@@ -39,6 +39,11 @@ FIND_TIMEOUT_SECONDS = float(os.environ.get("FIND_TIMEOUT_SECONDS", "420"))
 # Every score we see is a bge-reranker score.
 RAG_CONFIDENCE_THRESHOLD = float(os.environ.get("RAG_CONFIDENCE_THRESHOLD", "0.55"))
 
+# How many times a draft that failed grounding verification may be revised
+# (using the verifier's reason) before the turn escalates to a ticket. 0
+# disables revision: the first failed verdict files a ticket immediately.
+MAX_ANSWER_REVISIONS = int(os.environ.get("MAX_ANSWER_REVISIONS", "1"))
+
 # Consumed by `observability.configure_logging()`, the central logging setup.
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
