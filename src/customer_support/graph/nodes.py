@@ -42,6 +42,7 @@ from customer_support.prompts import (
     VERIFY_GROUNDING_PROMPT,
 )
 from customer_support.rag.answer import evidence_block, generate_answer, revise_answer
+from customer_support.rag.prompts import CUSTOMER_NAME_NOTE
 from customer_support.rag.client import get_rag
 from customer_support.rag.decompose import decompose
 from customer_support.rag.schema import EvidenceItem
@@ -95,6 +96,12 @@ def _language(state: State) -> str:
     path, so it only applies if a node is invoked outside the graph.
     """
     return state.get("response_language") or "ar"
+
+
+def _customer_name(state: State) -> str | None:
+    """The customer's name, or None -- `name` is nullable in the schema."""
+    customer = state.get("customer")
+    return customer.get("name") if customer else None
 
 
 def load_customer_if_needed(state: State, runtime: Runtime[Context]) -> dict:
@@ -167,10 +174,14 @@ def respond_directly(state: State) -> dict:
     from model memory.
     """
     language = _language(state)
+    system = DIRECT_RESPONSE_PROMPT
+    name = _customer_name(state)
+    if name:
+        system += CUSTOMER_NAME_NOTE.format(name=name)
     llm = build_model(settings=_settings())
     response = llm.invoke(
         [
-            {"role": "system", "content": DIRECT_RESPONSE_PROMPT},
+            {"role": "system", "content": system},
             {
                 "role": "user",
                 "content": (
@@ -213,6 +224,7 @@ def generate_answer_node(state: State) -> dict:
         state["retrieval"],
         _settings(),
         _language(state),
+        customer_name=_customer_name(state),
     )
     return {"answer_draft": draft}
 

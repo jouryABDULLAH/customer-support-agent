@@ -79,6 +79,13 @@ def main() -> int:
     check("caller-supplied id kept", full_id, "TEST-CUSTOMER-001")
     row = customers.get_customer_by_email(conn, "test-customer-001@example.com")
     check("fetch by email", row["id"], full_id)
+    matches = customers.get_customers_by_name(conn, "Test Customer")
+    check("fetch by name finds the one match", [r["id"] for r in matches], [full_id])
+    check("unknown name -> empty list", customers.get_customers_by_name(conn, "Nobody"), [])
+    # name is NOT unique: a second customer with the same name must yield both.
+    twin_id = customers.create_customer(conn, name="Test Customer")
+    matches = customers.get_customers_by_name(conn, "Test Customer")
+    check("shared name returns every match", sorted(r["id"] for r in matches), sorted([full_id, twin_id]))
     row = customers.get_customer_by_phone(conn, "0500000000")
     check("fetch by phone", row["id"], full_id)
     check("unknown phone is None", customers.get_customer_by_phone(conn, "0000"), None)

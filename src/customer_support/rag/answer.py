@@ -9,7 +9,11 @@ import logging
 import re
 
 from customer_support.model import build_model
-from customer_support.rag.prompts import GROUNDED_ANSWER_PROMPT, REVISE_ANSWER_PROMPT
+from customer_support.rag.prompts import (
+    CUSTOMER_NAME_NOTE,
+    GROUNDED_ANSWER_PROMPT,
+    REVISE_ANSWER_PROMPT,
+)
 from customer_support.rag.schema import RetrievalResult
 
 logger = logging.getLogger(__name__)
@@ -52,7 +56,11 @@ def evidence_block(retrieval: RetrievalResult) -> str:
 
 
 def generate_answer(
-    message: str, retrieval: RetrievalResult, settings, language: str
+    message: str,
+    retrieval: RetrievalResult,
+    settings,
+    language: str,
+    customer_name: str | None = None,
 ) -> str:
     """Answer `message` from `retrieval`'s evidence, in `language`.
 
@@ -78,10 +86,14 @@ def generate_answer(
 
     language_name = "Arabic" if language == "ar" else "English"
 
+    system = GROUNDED_ANSWER_PROMPT
+    if customer_name:
+        system += CUSTOMER_NAME_NOTE.format(name=customer_name)
+
     llm = build_model(settings=settings)
     response = llm.invoke(
         [
-            {"role": "system", "content": GROUNDED_ANSWER_PROMPT},
+            {"role": "system", "content": system},
             {
                 "role": "user",
                 "content": (

@@ -55,6 +55,18 @@ def get_customer(conn: sqlite3.Connection, customer_id: str) -> sqlite3.Row | No
     ).fetchone()
 
 
+def get_customers_by_name(conn: sqlite3.Connection, name: str) -> list[sqlite3.Row]:
+    """Every customer with exactly this name.
+
+    A list, not a single row: `name` carries no UNIQUE constraint, so unlike
+    id/email/phone it cannot promise one match. The caller decides what an
+    ambiguous name means -- the UI, for instance, refuses to log one in.
+    """
+    return conn.execute(
+        "SELECT * FROM customers WHERE name = ?", (name,)
+    ).fetchall()
+
+
 def get_customer_by_email(conn: sqlite3.Connection, email: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM customers WHERE email = ?", (email,)

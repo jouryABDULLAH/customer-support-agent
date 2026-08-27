@@ -31,7 +31,25 @@ passages provided.
 
 """
     + ANSWER_RULES
+    + """
+
+<greeting>
+- If the customer's message opens with a greeting, return it in the same
+  register, in one short phrase, before the answer: السلام عليكم gets
+  وعليكم السلام, "hi" or "hello" gets a brief hello, حياك الله gets a warm
+  welcome. The answer is the point; keep the greeting to a single phrase.
+- If the customer did not greet, do not add a greeting.
+</greeting>"""
 )
+
+# Appended to a system prompt when the customer's name is known. Kept out of
+# the static prompts: when there is no name, the model never sees a name
+# instruction at all.
+CUSTOMER_NAME_NOTE = """
+
+<customer>
+The customer's name is {name}. Address them by name in your reply.
+</customer>"""
 
 REVISE_ANSWER_PROMPT = (
     """\

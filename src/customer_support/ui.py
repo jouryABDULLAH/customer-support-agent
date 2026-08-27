@@ -1,4 +1,4 @@
-"""Streamlit UI for the customer-support agent.
+"""Streamlit UI for the customer-support agent: a support-request system.
 
     streamlit run src/customer_support/ui.py
 
@@ -26,15 +26,13 @@ from customer_support.db.customers import (
     get_customer,
     get_customer_by_email,
     get_customer_by_phone,
+    get_customers_by_name,
 )
 from customer_support.db.tickets import list_tickets
 from customer_support.graph import Context, build_graph
 from customer_support.observability import configure_logging, configure_tracing
 
 logger = logging.getLogger(__name__)
-
-# Chat avatars: plain color blocks, no icons.
-_AVATARS = {"user": "🟦", "assistant": "🟧"}
 
 
 @st.cache_resource
@@ -46,14 +44,30 @@ def get_graph():
     return build_graph()
 
 
-def find_customer(query: str):
-    """Resolve an id, email, or phone to a customer row, or None."""
+def find_customer(query: str) -> tuple[object, str | None]:
+    """Resolve a query to (customer row | None, error message | None).
+
+    Unique identifiers (id, email, phone) are tried first; name last, and
+    only when it matches exactly one customer -- an ambiguous name refuses
+    with a message naming the unique alternatives.
+    """
     with closing(connect()) as conn:
-        return (
+        row = (
             get_customer(conn, query)
             or get_customer_by_email(conn, query)
             or get_customer_by_phone(conn, query)
         )
+        if row is not None:
+            return row, None
+        matches = get_customers_by_name(conn, query)
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) > 1:
+        return None, (
+            f"{len(matches)} customers share the name {query!r}. "
+            "Log in with an email, phone, or id instead."
+        )
+    return None, "No customer found with that name, id, email, or phone. Register instead."
 
 
 def _select_customer(row) -> None:
@@ -92,7 +106,7 @@ def header_bar() -> None:
     """One tight row under the title: customer identity and controls."""
     customer = st.session_state.get("customer")
     if customer:
-        who, new, switch = st.columns([3, 1, 1], vertical_alignment="center")
+        who, new, switch = st.columns([2.4, 1.3, 1.3], vertical_alignment="center")
         who.markdown(f"**{customer['name'] or customer['id']}** · `{customer['id']}`")
         if new.button("New conversation", use_container_width=True):
             st.session_state["thread_id"] = uuid.uuid4().hex
@@ -106,12 +120,12 @@ def header_bar() -> None:
 
     query_col, login, register = st.columns([3, 1, 1], vertical_alignment="bottom")
     query = query_col.text_input(
-        "Customer", placeholder="id, email, or phone", label_visibility="collapsed"
+        "Customer", placeholder="name, id, email, or phone", label_visibility="collapsed"
     )
     if login.button("Login", use_container_width=True):
-        row = find_customer(query.strip()) if query.strip() else None
+        row, problem = find_customer(query.strip()) if query.strip() else (None, "Enter a name, id, email, or phone.")
         if row is None:
-            st.error("No customer found with that id, email, or phone. Register instead.")
+            st.error(problem)
         else:
             _select_customer(row)
             st.rerun()
@@ -119,18 +133,27 @@ def header_bar() -> None:
         register_dialog()
 
 
-def chat_tab(graph, customer: dict) -> None:
-    """The conversation: history from the checkpoint, one invoke per message."""
+def request_tab(graph, customer: dict) -> None:
+    """Submit a support request; the conversation renders as an email-like
+    thread of Request/Response blocks, not chat bubbles.
+
+    Underneath it is still the same graph thread: one submitted request is one
+    invocation on the current `thread_id`, and history is re-read from the
+    checkpoint. A request becomes a ticket only when the graph escalates it.
+    """
     config = {"configurable": {"thread_id": st.session_state["thread_id"]}}
 
     # The checkpoint is the conversation's source of truth; render from it.
-    values = graph.get_state(config).values
-    for message in values.get("messages", []):
-        role = "user" if message.type == "human" else "assistant"
-        with st.chat_message(role, avatar=_AVATARS[role]):
-            st.markdown(message.content)
+    # Customer text gets its newlines preserved (markdown collapses single
+    # ones); agent responses render as-is -- the model emits real markdown.
+    for message in graph.get_state(config).values.get("messages", []):
+        is_request = message.type == "human"
+        st.caption("Request" if is_request else "Response")
+        with st.container(border=True):
+            content = str(message.content)
+            st.markdown(content.replace("\n", "  \n") if is_request else content)
 
-    # Evidence and ticket acknowledgment belong to the latest turn only.
+    # Ticket acknowledgment and evidence belong to the latest response only.
     last_turn = st.session_state.get("last_turn")
     if last_turn:
         if last_turn.get("ticket_id"):
@@ -143,20 +166,29 @@ def chat_tab(graph, customer: dict) -> None:
                     st.markdown(item["content"])
                     st.divider()
 
-    # Reserved BEFORE the input so the in-flight turn (echoed message,
-    # spinner, errors) renders above the box -- widgets placed after
-    # `st.chat_input` would otherwise appear below it.
+    # Reserved BEFORE the form so the in-flight request and spinner render
+    # above it, in the thread where the exchange will appear.
     turn_area = st.container()
 
-    prompt = st.chat_input("Type your message")
-    if prompt:
+    st.divider()
+    with st.form("new_request", clear_on_submit=True):
+        text = st.text_area(
+            "Describe your request",
+            height=140,
+            placeholder="Describe your question or problem...",
+        )
+        submitted = st.form_submit_button("Submit Request", type="primary")
+
+    if submitted and text.strip():
+        request = text.strip()
         with turn_area:
-            with st.chat_message("user", avatar=_AVATARS["user"]):
-                st.markdown(prompt)
+            st.caption("Request")
+            with st.container(border=True):
+                st.markdown(request.replace("\n", "  \n"))
             try:
-                with st.spinner("Searching the documentation... (retrieval can take a minute or two)"):
+                with st.spinner("Processing your request... (this can take a minute or two)"):
                     state = graph.invoke(
-                        {"messages": [{"role": "user", "content": prompt}]},
+                        {"messages": [{"role": "user", "content": request}]},
                         config=config,
                         context=Context(customer_id=customer["id"]),
                     )
@@ -166,7 +198,7 @@ def chat_tab(graph, customer: dict) -> None:
                 }
             except Exception as error:
                 logger.exception("graph invocation failed")
-                st.error(f"Something went wrong handling this message: {error}")
+                st.error(f"Something went wrong handling this request: {error}")
         st.rerun()
 
 
@@ -185,8 +217,23 @@ def tickets_tab(customer: dict) -> None:
             st.caption(f"ticket {row['id']} · product {row['product']}")
 
 
+# Per-paragraph auto direction: an Arabic paragraph renders right-to-left and
+# right-aligned, an English one left-to-right, decided by its first strong
+# character -- no per-message language logic, and markdown structure is kept.
+# Also applied to the request text area so Arabic is typed RTL.
+_RTL_CSS = """<style>
+[data-testid="stMarkdownContainer"] :is(p, li, h1, h2, h3, h4),
+textarea {
+    unicode-bidi: plaintext;
+    text-align: start;
+}
+.stButton button p { white-space: nowrap; }
+</style>"""
+
+
 def main() -> None:
     st.set_page_config(page_title="Customer Support Agent", page_icon="💬")
+    st.markdown(_RTL_CSS, unsafe_allow_html=True)
     graph = get_graph()
 
     st.title("Customer Support Agent")
@@ -197,9 +244,9 @@ def main() -> None:
         st.info("Log in or register above to start.")
         return
 
-    chat, tickets = st.tabs(["Chat", "Tickets"])
-    with chat:
-        chat_tab(graph, customer)
+    request, tickets = st.tabs(["New Request", "Tickets"])
+    with request:
+        request_tab(graph, customer)
     with tickets:
         tickets_tab(customer)
 
