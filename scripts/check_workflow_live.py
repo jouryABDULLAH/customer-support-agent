@@ -477,6 +477,14 @@ def scenario_r() -> None:
         # Latin identifiers inside an Arabic message do not flip the language.
         ("arabic with latin product name stays ar",
          "عندي مشكلة في MSEGAT API", "retrieve_evidence", "ar"),
+        # A preamble announces a question without containing one -- nothing to
+        # look up yet, even though it names the product. Phrased differently
+        # from the prompt's examples on purpose.
+        ("question preamble routes direct",
+         "بسألك سؤال عن مسجات", "respond_directly", "ar"),
+        # But a preamble WITH the question attached still retrieves.
+        ("preamble plus actual question retrieves",
+         "عندي سؤال: كم سعر الباقة البرونزية؟", "retrieve_evidence", "ar"),
     )
     for label, message, expected_route, expected_language in cases:
         result = graph_nodes.router({"messages": [HumanMessage(content=message)]})
