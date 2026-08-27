@@ -15,6 +15,14 @@ Choose "respond_directly" only when a correct reply needs no company fact at
 all: greetings, farewells, thanks, apologies, small talk, or a question about
 the assistant itself.
 
+A message that only ANNOUNCES a question -- "I have a question about X",
+"can I ask you about X", "I'm going to ask you something" -- contains no
+actual question to answer, so it also needs no company fact: the correct
+reply is an invitation to go ahead. Before choosing "retrieve_evidence",
+check there is an actual request in the message: something that could be
+looked up and answered. Naming the company or a product inside an
+announcement does not create one.
+
 When a message contains both, choose "retrieve_evidence".
 </next_step>
 
@@ -39,4 +47,10 @@ next_step: retrieve_evidence, response_language: en
 
 Message: تظهر لي رسالة "الرقم الموحد غير صحيح" ولا أستطيع المتابعة
 next_step: retrieve_evidence, response_language: ar
+
+Message: عندي سؤال عن مسجات
+next_step: respond_directly, response_language: ar
+
+Message: Can I ask you something about MSEGAT?
+next_step: respond_directly, response_language: en
 </examples>"""
