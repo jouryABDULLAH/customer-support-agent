@@ -16,6 +16,7 @@ from the checkpoint's pending interrupt, not stored here.
 """
 
 import logging
+import threading
 import uuid
 from contextlib import closing
 
@@ -33,6 +34,7 @@ from customer_support.db.customers import (
 from customer_support.db.tickets import list_tickets
 from customer_support.graph import Context, build_graph
 from customer_support.observability import configure_logging, configure_tracing
+from customer_support.rag.client import get_rag
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,20 @@ def get_graph():
     configure_tracing()
     migrate().close()
     return build_graph()
+
+
+@st.cache_resource
+def start_warmup() -> threading.Thread:
+    """Build the Qdrant client, embedder and reranker in the background.
+
+    RAGent2 builds them lazily on the first search, which put ~50 s of setup
+    on the first request. Started once per process when the app loads;
+    `_run_turn` joins it before invoking, so a request that arrives mid-warmup
+    waits for it instead of building a second copy of the models.
+    """
+    thread = threading.Thread(target=lambda: get_rag().retriever, name="rag-warmup", daemon=True)
+    thread.start()
+    return thread
 
 
 def find_customer(query: str) -> tuple[object, str | None]:
@@ -160,6 +176,7 @@ def _run_turn(graph, graph_input, config: dict, customer: dict) -> None:
     """
     try:
         with st.spinner("Processing your request... (this can take a minute or two)"):
+            start_warmup().join()
             state = graph.invoke(
                 graph_input,
                 config=config,
@@ -299,6 +316,7 @@ def main() -> None:
     st.set_page_config(page_title="Customer Support Agent", page_icon="💬")
     st.markdown(_RTL_CSS, unsafe_allow_html=True)
     graph = get_graph()
+    start_warmup()
 
     st.title("Customer Support Agent")
     header_bar()
