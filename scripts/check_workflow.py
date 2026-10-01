@@ -52,8 +52,11 @@ EXPECTED_EDGES = {
     ("verify", "ticket_agent"),
     ("revise_answer", "verify"),
     ("deliver_answer", "finalize_turn"),
-    ("ticket_agent", "create_ticket"),
+    ("ticket_agent", "confirm_ticket"),
+    ("confirm_ticket", "create_ticket"),
+    ("confirm_ticket", "decline_ticket"),
     ("create_ticket", "finalize_turn"),
+    ("decline_ticket", "finalize_turn"),
     ("finalize_turn", "__end__"),
 }
 
@@ -107,7 +110,7 @@ def check_structure() -> None:
         "load_customer_if_needed", "router", "respond_directly",
         "decompose_question", "search_subquestions", "generate_answer",
         "verify", "revise_answer", "deliver_answer", "ticket_agent",
-        "create_ticket", "finalize_turn",
+        "confirm_ticket", "decline_ticket", "create_ticket", "finalize_turn",
     ):
         check(f"node {name!r} registered", name in nodes, True)
 
@@ -115,7 +118,7 @@ def check_structure() -> None:
     check("edges match the target workflow", edges, EXPECTED_EDGES)
     conditional = {(e.source, e.target) for e in graph.edges if e.conditional}
     check(
-        "the three branches are conditional edges",
+        "the four branches are conditional edges",
         conditional,
         {
             ("router", "respond_directly"),
@@ -125,6 +128,8 @@ def check_structure() -> None:
             ("verify", "deliver_answer"),
             ("verify", "revise_answer"),
             ("verify", "ticket_agent"),
+            ("confirm_ticket", "create_ticket"),
+            ("confirm_ticket", "decline_ticket"),
         },
     )
 

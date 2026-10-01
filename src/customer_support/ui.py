@@ -11,7 +11,8 @@ State ownership: LangGraph's checkpoint is the source of truth for the
 conversation -- messages are always re-read from `graph.get_state()` rather
 than mirrored in Streamlit. `st.session_state` holds only UI concerns: which
 customer is selected, the current thread id, and the last turn's evidence /
-ticket id for rendering.
+ticket id for rendering. A ticket awaiting the customer's approval is read
+from the checkpoint's pending interrupt, not stored here.
 """
 
 import logging
@@ -19,6 +20,7 @@ import uuid
 from contextlib import closing
 
 import streamlit as st
+from langgraph.types import Command
 
 from customer_support.db.connection import connect, migrate
 from customer_support.db.customers import (
@@ -133,25 +135,95 @@ def header_bar() -> None:
         register_dialog()
 
 
+# The approval card's text, in the turn's response language like every other
+# customer-facing reply.
+_APPROVAL_TEXT = {
+    "ar": {
+        "prompt": "لم أجد إجابة لاستفسارك في المصادر المعتمدة. هل ترغب بفتح تذكرة دعم ليتابعها أحد المختصين؟",
+        "approve": "فتح التذكرة",
+        "decline": "لا، شكراً",
+    },
+    "en": {
+        "prompt": "I couldn't find an answer in my approved sources. Open a support ticket so a specialist can follow up?",
+        "approve": "Open ticket",
+        "decline": "No thanks",
+    },
+}
+
+
+def _run_turn(graph, graph_input, config: dict, customer: dict) -> None:
+    """Invoke the graph and record what the UI shows for the turn.
+
+    A turn that pauses for ticket approval has not reached `finalize_turn`,
+    so its evidence and ticket id are not this turn's yet; nothing is
+    recorded until it resumes.
+    """
+    try:
+        with st.spinner("Processing your request... (this can take a minute or two)"):
+            state = graph.invoke(
+                graph_input,
+                config=config,
+                context=Context(customer_id=customer["id"]),
+            )
+        if "__interrupt__" in state:
+            st.session_state.pop("last_turn", None)
+        else:
+            st.session_state["last_turn"] = {
+                "evidence": state.get("response_evidence") or [],
+                "ticket_id": state.get("ticket_id"),
+            }
+    except Exception as error:
+        logger.exception("graph invocation failed")
+        st.error(f"Something went wrong handling this request: {error}")
+
+
+def approval_card(graph, snapshot, config: dict, customer: dict) -> None:
+    """The drafted ticket, with approve / decline. Replaces the request form
+    while it is pending: the turn is not over until the customer answers."""
+    draft = snapshot.interrupts[0].value
+    text = _APPROVAL_TEXT[snapshot.values.get("response_language") or "ar"]
+
+    st.caption("Response")
+    with st.container(border=True):
+        st.markdown(text["prompt"])
+        with st.container(border=True):
+            st.markdown(f"**{draft['subject']}**")
+            st.caption(draft["category"])
+            st.markdown(draft["problem_description"])
+        approve, decline, _ = st.columns([1, 1, 2])
+        approved = approve.button(text["approve"], type="primary", use_container_width=True)
+        declined = decline.button(text["decline"], use_container_width=True)
+
+    if approved or declined:
+        _run_turn(graph, Command(resume=approved), config, customer)
+        st.rerun()
+
+
 def request_tab(graph, customer: dict) -> None:
     """Submit a support request; the conversation renders as an email-like
     thread of Request/Response blocks, not chat bubbles.
 
     Underneath it is still the same graph thread: one submitted request is one
     invocation on the current `thread_id`, and history is re-read from the
-    checkpoint. A request becomes a ticket only when the graph escalates it.
+    checkpoint. A request becomes a ticket only when the graph escalates it
+    and the customer approves the drafted ticket.
     """
     config = {"configurable": {"thread_id": st.session_state["thread_id"]}}
+    snapshot = graph.get_state(config)
 
     # The checkpoint is the conversation's source of truth; render from it.
     # Customer text gets its newlines preserved (markdown collapses single
     # ones); agent responses render as-is -- the model emits real markdown.
-    for message in graph.get_state(config).values.get("messages", []):
+    for message in snapshot.values.get("messages", []):
         is_request = message.type == "human"
         st.caption("Request" if is_request else "Response")
         with st.container(border=True):
             content = str(message.content)
             st.markdown(content.replace("\n", "  \n") if is_request else content)
+
+    if snapshot.interrupts:
+        approval_card(graph, snapshot, config, customer)
+        return
 
     # Ticket acknowledgment and evidence belong to the latest response only.
     last_turn = st.session_state.get("last_turn")
@@ -185,20 +257,12 @@ def request_tab(graph, customer: dict) -> None:
             st.caption("Request")
             with st.container(border=True):
                 st.markdown(request.replace("\n", "  \n"))
-            try:
-                with st.spinner("Processing your request... (this can take a minute or two)"):
-                    state = graph.invoke(
-                        {"messages": [{"role": "user", "content": request}]},
-                        config=config,
-                        context=Context(customer_id=customer["id"]),
-                    )
-                st.session_state["last_turn"] = {
-                    "evidence": state.get("response_evidence") or [],
-                    "ticket_id": state.get("ticket_id"),
-                }
-            except Exception as error:
-                logger.exception("graph invocation failed")
-                st.error(f"Something went wrong handling this request: {error}")
+            _run_turn(
+                graph,
+                {"messages": [{"role": "user", "content": request}]},
+                config,
+                customer,
+            )
         st.rerun()
 
 

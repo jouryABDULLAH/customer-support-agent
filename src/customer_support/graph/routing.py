@@ -75,3 +75,14 @@ def route_after_verification(
         return "revise_answer"
     logger.info("verification failed after revision; escalating to a ticket.")
     return "ticket_agent"
+
+
+def route_after_confirmation(state: State) -> Literal["create_ticket", "decline_ticket"]:
+    """Create the ticket only on an explicit approval.
+
+    Anything other than `True` -- including a missing answer -- declines: a
+    ticket the customer did not agree to is exactly what this step prevents.
+    """
+    if state.get("ticket_approved") is True:
+        return "create_ticket"
+    return "decline_ticket"

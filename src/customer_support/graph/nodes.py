@@ -7,7 +7,7 @@ state to pick an edge.
 Three kinds, kept honestly apart:
 
 * **Deterministic** -- `load_customer_if_needed`, `search_subquestions`,
-  `deliver_answer`, `create_ticket`, `finalize_turn`. No model is consulted
+  `deliver_answer`, `decline_ticket`, `create_ticket`, `finalize_turn`. No model is consulted
   where there is nothing to reason about.
 * **Focused LLM calls** -- `router`, `respond_directly`, `decompose_question`,
   `generate_answer`, `verify`, `ticket_agent`. One responsibility each; the
@@ -27,6 +27,7 @@ from contextlib import closing
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
+from langgraph.types import interrupt
 
 from customer_support.config import STRIP_CITATION_MARKERS, TICKET_PRODUCT
 from customer_support.db.connection import connect
@@ -65,6 +66,19 @@ _TICKET_ACK = {
         "I could not answer your question from my approved sources, so I have "
         "opened support ticket {ticket_id} for you. A support specialist will "
         "follow up with you."
+    ),
+}
+
+# The customer-facing reply when they decline the drafted ticket. Deterministic
+# for the same reason as `_TICKET_ACK`.
+_TICKET_DECLINED = {
+    "ar": (
+        "لم أتمكن من الإجابة على استفسارك من المصادر المعتمدة لدي، "
+        "ولم يتم فتح تذكرة دعم بناءً على طلبك."
+    ),
+    "en": (
+        "I could not answer your question from my approved sources, and no "
+        "support ticket was opened, as you requested."
     ),
 }
 
@@ -416,6 +430,38 @@ def ticket_agent(state: State) -> dict:
     logger.info("ticket_agent: category=%s subject=%r", draft.category, draft.subject)
     return {"ticket_draft": draft.model_dump()}
 
+def confirm_ticket(): # calls interrupt({...ticket_draft}) , recieves approved: bool.
+    # approved -> create_ticket
+    # rejected -> small node the sends a fixed "no ticket opened" message. -> finalize_turn 
+    pass
+
+def confirm_ticket(state: State) -> dict:
+    """Pause for the customer to approve or decline the drafted ticket.
+
+    A node of its own so that resuming -- which re-runs the paused node from
+    the top -- does not repeat the `ticket_agent` model call. The interrupt
+    payload is the draft; the resume value is the customer's `approved: bool`.
+    """
+    approved = bool(interrupt(state["ticket_draft"]))
+    logger.info("confirm_ticket: approved=%s", approved)
+    return {"ticket_approved": approved}
+
+
+def decline_ticket(state: State) -> dict:
+    """Tell the customer no ticket was opened.
+
+    Clears `ticket_id` explicitly: `finalize_turn` republishes it whenever a
+    draft exists, and without this a declined turn would carry the previous
+    turn's ticket id.
+    """
+    text = _TICKET_DECLINED[_language(state)]
+    return {
+        "ticket_id": None,
+        "final_response": text,
+        "messages": [AIMessage(content=text)],
+    }
+
+
 def _coverage_section(state: State) -> str:
     """What the documents did and did not answer, for the ticket description.
 
@@ -518,4 +564,5 @@ def finalize_turn(state: State) -> dict:
         "grounding": None,
         "answer_revision_count": 0,
         "ticket_draft": None,
+        "ticket_approved": None,
     }
