@@ -16,6 +16,10 @@ Choose the one that best fits what the customer needs:
 - usage     how to perform a supported task; feature questions
 - policy    terms, requirements, eligibility, legal or regulatory rules
 - other     none of the above fits
+
+A request about the customer's own account itself -- freezing, closing,
+deleting, reactivating it, or changing its details -- is account, even when
+phrased as "how do I". usage is for how to use a product feature.
 </category>
 
 <subject>
