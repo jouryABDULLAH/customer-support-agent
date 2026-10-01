@@ -43,7 +43,7 @@ def route_after_retrieval(state: State) -> Literal["generate_answer", "ticket_ag
 def route_after_verification(
     state: State,
 ) -> Literal["deliver_answer", "revise_answer", "ticket_agent"]:
-    """Deliver a passed draft; revise a failed one once; then ticket.
+    """Deliver a passed, answering draft; revise a failed one once; then ticket.
 
     A failed verdict is a claim the evidence does not support, but the
     verifier's reason names it, so one bounded correction attempt
@@ -55,13 +55,21 @@ def route_after_verification(
     missing verdict means verification did not record a result, and the
     fail-safe for that is escalation, not a revision pass working from no
     reason.
+
+    A grounded draft that does not answer (`answered=False`) -- typically an
+    honest "the information does not say" -- goes straight to a ticket. It is
+    not revised: the revision prompt forbids adding claims, so it could only
+    produce the same non-answer again.
     """
     grounding = state.get("grounding")
     if grounding is None:
         logger.info("no verification verdict; escalating to a ticket.")
         return "ticket_agent"
     if grounding["grounded"]:
-        return "deliver_answer"
+        if grounding["answered"]:
+            return "deliver_answer"
+        logger.info("draft is grounded but does not answer; escalating to a ticket.")
+        return "ticket_agent"
     if state.get("answer_revision_count", 0) < MAX_ANSWER_REVISIONS:
         logger.info("verification failed; attempting one revision.")
         return "revise_answer"

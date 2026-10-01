@@ -11,7 +11,8 @@ changes.
          |- respond_directly ----------------------------------.
          '- decompose_question -> search_subquestions           |
               |- (all_high)      generate_answer -> verify      |
-              |                     |- (grounded) deliver_answer|
+              |                     |- (grounded+answered) deliver_answer
+              |                     |- (grounded, unanswered) ticket_agent
               |                     |- (fail, 1st) revise_answer|
               |                     |       '-> verify (again)  |
               |                     '- (fail, again) --.        |

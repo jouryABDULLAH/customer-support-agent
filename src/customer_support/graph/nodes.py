@@ -275,8 +275,17 @@ def verify(state: State) -> dict:
         ],
         settings=_settings(),
     )
-    logger.info("grounding: grounded=%s reason=%s", result.grounded, result.reason)
-    return {"grounding": {"grounded": result.grounded, "reason": result.reason}}
+    logger.info(
+        "grounding: grounded=%s answered=%s reason=%s",
+        result.grounded, result.answered, result.reason,
+    )
+    return {
+        "grounding": {
+            "grounded": result.grounded,
+            "answered": result.answered,
+            "reason": result.reason,
+        }
+    }
 
 
 # The model's invented reference markers, e.g. 【1†L1-L3】. Any preceding
@@ -332,6 +341,12 @@ def _unresolved_notes(state: State) -> str:
         return notes
 
     reason = grounding["reason"] if grounding else "unknown"
+    if grounding and grounding["grounded"] and not grounding["answered"]:
+        return (
+            "Evidence was retrieved and an answer was drafted, but the draft "
+            "did not answer the customer's question from it; no reply was sent "
+            f"to the customer. Verifier reason: {reason}"
+        )
     revisions = state.get("answer_revision_count", 0)
     attempted = (
         f" A corrected draft was attempted {revisions} time(s) and still "

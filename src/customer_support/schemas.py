@@ -56,7 +56,12 @@ class RouteDecision(BaseModel):
 
 
 class GroundingResult(BaseModel):
-    """Verifier output: whether every claim in the draft is supported.
+    """Verifier output: whether every claim in the draft is supported, and
+    whether the draft actually answers every question.
+
+    The two are separate because an honest "the information does not say" is
+    grounded but answers nothing; `answered` is what keeps such a draft from
+    being delivered as if it were a reply.
 
     `reason` is internal -- it is logged and handed to the ticket agent when
     verification fails, never shown to the customer.
@@ -65,6 +70,7 @@ class GroundingResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     grounded: bool
+    answered: bool
     reason: str
 
 
@@ -72,6 +78,7 @@ class GroundingState(TypedDict):
     """`GroundingResult` as stored in graph state."""
 
     grounded: bool
+    answered: bool
     reason: str
 
 

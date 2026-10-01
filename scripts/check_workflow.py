@@ -163,34 +163,51 @@ def check_routing() -> None:
 
     check(
         "grounded -> deliver_answer",
-        route_after_verification({"grounding": {"grounded": True, "reason": "ok"}}),
+        route_after_verification({"grounding": {"grounded": True, "answered": True, "reason": "ok"}}),
         "deliver_answer",
     )
     check(
         "first failure -> revise_answer",
-        route_after_verification({"grounding": {"grounded": False, "reason": "no"}}),
+        route_after_verification({"grounding": {"grounded": False, "answered": True, "reason": "no"}}),
         "revise_answer",
     )
     check(
         "failure after revision -> ticket_agent",
         route_after_verification(
-            {"grounding": {"grounded": False, "reason": "no"}, "answer_revision_count": 1}
+            {"grounding": {"grounded": False, "answered": True, "reason": "no"}, "answer_revision_count": 1}
         ),
         "ticket_agent",
     )
     check(
         "grounded after revision -> deliver_answer",
         route_after_verification(
-            {"grounding": {"grounded": True, "reason": "ok"}, "answer_revision_count": 1}
+            {"grounding": {"grounded": True, "answered": True, "reason": "ok"}, "answer_revision_count": 1}
         ),
         "deliver_answer",
+    )
+    check(
+        "grounded but unanswered -> ticket_agent, never revision",
+        route_after_verification(
+            {"grounding": {"grounded": True, "answered": False, "reason": "says info is missing"}}
+        ),
+        "ticket_agent",
+    )
+    check(
+        "grounded but unanswered after revision -> ticket_agent",
+        route_after_verification(
+            {
+                "grounding": {"grounded": True, "answered": False, "reason": "says info is missing"},
+                "answer_revision_count": 1,
+            }
+        ),
+        "ticket_agent",
     )
     saved_max = routing_module.MAX_ANSWER_REVISIONS
     try:
         routing_module.MAX_ANSWER_REVISIONS = 0
         check(
             "MAX=0 disables revision entirely",
-            route_after_verification({"grounding": {"grounded": False, "reason": "no"}}),
+            route_after_verification({"grounding": {"grounded": False, "answered": True, "reason": "no"}}),
             "ticket_agent",
         )
     finally:
@@ -217,7 +234,7 @@ def check_unresolved_notes() -> None:
     grounding_failure = _unresolved_notes(
         {
             "retrieval": retrieval(("a", "high")),
-            "grounding": {"grounded": False, "reason": "invented a 3-day timeframe"},
+            "grounding": {"grounded": False, "answered": True, "reason": "invented a 3-day timeframe"},
         }
     )
     check(
@@ -225,6 +242,15 @@ def check_unresolved_notes() -> None:
         "invented a 3-day timeframe" in grounding_failure,
         True,
     )
+
+    unanswered = _unresolved_notes(
+        {
+            "retrieval": retrieval(("a", "high")),
+            "grounding": {"grounded": True, "answered": False, "reason": "freezing is not covered"},
+        }
+    )
+    check("unanswered: carries the verifier's reason", "freezing is not covered" in unanswered, True)
+    check("unanswered: says no reply was sent", "no reply was sent" in unanswered, True)
 
 
 def check_citation_stripping() -> None:
@@ -258,7 +284,7 @@ def check_finalize_turn() -> None:
             "questions": ["q"],
             "retrieval": retrieval(("a", "high"), ("b", "high")),
             "answer_draft": "draft",
-            "grounding": {"grounded": True, "reason": "ok"},
+            "grounding": {"grounded": True, "answered": True, "reason": "ok"},
             "answer_revision_count": 1,
             "ticket_draft": None,
             "ticket_id": "STALE-TICKET",

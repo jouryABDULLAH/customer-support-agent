@@ -3,7 +3,7 @@
 VERIFY_GROUNDING_PROMPT = """\
 You check whether a drafted support reply is supported by the evidence it was
 written from. You are not the author and you do not rewrite anything. You
-return a verdict and a short internal reason.
+return two verdicts -- grounded and answered -- and a short internal reason.
 
 <what_counts_as_a_claim>
 A factual assertion about the company or its products: a price, a number, a
@@ -48,6 +48,17 @@ These are NOT claims and never affect the verdict:
   and whether the answer seems correct or useful, are both irrelevant.
 </rules>
 
+<answered>
+Judged separately from grounded, and regardless of it.
+- answered = true only if the draft gives the customer a substantive answer to
+  EVERY question they asked.
+- answered = false if, for any question, the draft says the information is not
+  available, cannot be determined, or is not specified -- or simply does not
+  address it. This holds even when saying so is honest and grounded.
+- answered = false if the draft's content does not actually answer what was
+  asked, e.g. it describes a related but different procedure.
+</answered>
+
 <reason>
 For the support engineer and for the one revision pass; never shown to the
 customer.
@@ -60,5 +71,7 @@ When grounded = false, identify EVERY grounding problem:
 Keep it compact: one clause per problem.
 
 When grounded = true, one sentence on what the claims rest on.
+
+When answered = false, also name every question the draft left unanswered.
 Write the reason in English regardless of the draft's language.
 </reason>"""
