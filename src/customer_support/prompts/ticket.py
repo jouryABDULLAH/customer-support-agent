@@ -32,9 +32,10 @@ apart in a list.
 A few sentences for the engineer:
 - what the customer is asking for, in your own words;
 - any identifiers they gave -- error codes, package names, numbers, URLs --
-  reproduced exactly;
-- which parts are unresolved, taken from UNRESOLVED below. Do not restate the
-  retrieval scores or mention the retrieval machinery.
+  reproduced exactly.
+Do not say which questions the documents do or do not answer: the application
+appends that list itself, from the retrieval results. Do not mention retrieval
+scores or the retrieval machinery.
 Do not include the customer's message verbatim; it is stored on the ticket
 already.
 </problem_description>

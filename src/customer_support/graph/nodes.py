@@ -68,6 +68,38 @@ _TICKET_ACK = {
     ),
 }
 
+# Headings for the coverage section `create_ticket` appends to the ticket's
+# description, in the ticket's language. Deterministic for the same reason as
+# `_TICKET_ACK`: which questions the documents cover is already known from
+# retrieval, and the ticket agent, left to restate it, flattened it into
+# "nothing was answerable".
+_TICKET_COVERAGE = {
+    "ar": {
+        "not_covered": "لا تجيب الوثائق المعتمدة عن:",
+        "covered": "تغطي الوثائق ما يلي، لكن لم يُرسل أي رد للعميل:",
+        "unanswered_draft": (
+            "تمت صياغة رد من الوثائق لكنه لم يُجب عن سؤال العميل، ولم يُرسل. "
+            "سبب المدقق:"
+        ),
+        "failed_draft": (
+            "تمت صياغة إجابة من الوثائق لكنها لم تجتز التحقق، ولم تُرسل. "
+            "سبب المدقق:"
+        ),
+    },
+    "en": {
+        "not_covered": "The approved documents do not answer:",
+        "covered": "The documents cover the following, but no reply was sent to the customer:",
+        "unanswered_draft": (
+            "A reply was drafted from the documents but did not answer the "
+            "customer's question, so it was not sent. Verifier reason:"
+        ),
+        "failed_draft": (
+            "An answer was drafted from the documents but failed verification, "
+            "so it was not sent. Verifier reason:"
+        ),
+    },
+}
+
 _LANGUAGE_NAMES = {"ar": "Arabic", "en": "English"}
 
 
@@ -384,13 +416,46 @@ def ticket_agent(state: State) -> dict:
     logger.info("ticket_agent: category=%s subject=%r", draft.category, draft.subject)
     return {"ticket_draft": draft.model_dump()}
 
+def _coverage_section(state: State) -> str:
+    """What the documents did and did not answer, for the ticket description.
+
+    Built from retrieval and the verdict, never from the model. The verifier's
+    reason is internal and always English; it is included as written.
+    """
+    retrieval = state.get("retrieval")
+    if retrieval is None:
+        return ""
+    text = _TICKET_COVERAGE[_language(state)]
+
+    if retrieval["outcome"] == "needs_escalation":
+        section = text["not_covered"] + "\n" + "\n".join(
+            f"- {q}" for q in low_confidence_questions(retrieval)
+        )
+        covered = [
+            r["question"] for r in retrieval["results"] if r["confidence"] == "high"
+        ]
+        if covered:
+            section += "\n\n" + text["covered"] + "\n" + "\n".join(
+                f"- {q}" for q in covered
+            )
+        return section
+
+    grounding = state.get("grounding")
+    reason = grounding["reason"] if grounding else "unknown"
+    if grounding and grounding["grounded"] and not grounding["answered"]:
+        return f"{text['unanswered_draft']} {reason}"
+    return f"{text['failed_draft']} {reason}"
+
 
 def create_ticket(state: State) -> dict:
     """Persist the ticket and acknowledge it to the customer.
 
     Combines the drafted fields with the trusted ones. `original_message` is
     the customer's text exactly as received: it is the record of what was
-    asked, and a rephrased copy would quietly rewrite that record.
+    asked, and a rephrased copy would quietly rewrite that record. The
+    description is the agent's summary of the request followed by
+    `_coverage_section`, so what was and was not answered is never left to
+    the model.
     """
     customer = state["customer"]
     draft = state["ticket_draft"]
@@ -404,7 +469,11 @@ def create_ticket(state: State) -> dict:
             product=TICKET_PRODUCT,
             category=draft["category"],
             subject=draft["subject"],
-            problem_description=draft["problem_description"],
+            problem_description="\n\n".join(
+                part
+                for part in (draft["problem_description"], _coverage_section(state))
+                if part
+            ),
             original_message=_customer_message(state),
         )
 

@@ -19,6 +19,7 @@ from customer_support.graph import Context, build_graph
 from customer_support.graph.checkpoint import get_checkpointer
 from customer_support.graph import nodes as graph_nodes
 from customer_support.graph.nodes import (
+    _coverage_section,
     _unresolved_notes,
     deliver_answer,
     finalize_turn,
@@ -253,6 +254,40 @@ def check_unresolved_notes() -> None:
     check("unanswered: says no reply was sent", "no reply was sent" in unanswered, True)
 
 
+def check_coverage_section() -> None:
+    mixed = _coverage_section(
+        {"response_language": "en", "retrieval": retrieval(("kept", "high"), ("lost", "low"))}
+    )
+    not_covered, _, covered = mixed.partition("The documents cover")
+    check("lists the low question under not answered", "- lost" in not_covered, True)
+    check("does not list the high question as unanswered", "kept" in not_covered, False)
+    check("lists the high question as covered", "- kept" in covered, True)
+
+    all_low = _coverage_section({"response_language": "ar", "retrieval": retrieval(("lost", "low"))})
+    check("arabic headings", all_low.startswith("لا تجيب الوثائق المعتمدة عن:"), True)
+    check("no covered heading when nothing was covered", "تغطي الوثائق" in all_low, False)
+
+    unanswered = _coverage_section(
+        {
+            "response_language": "en",
+            "retrieval": retrieval(("a", "high")),
+            "grounding": {"grounded": True, "answered": False, "reason": "freezing not covered"},
+        }
+    )
+    check("unanswered draft: says it did not answer", "did not answer" in unanswered, True)
+    check("unanswered draft: carries the reason", "freezing not covered" in unanswered, True)
+
+    failed = _coverage_section(
+        {
+            "response_language": "en",
+            "retrieval": retrieval(("a", "high")),
+            "grounding": {"grounded": False, "answered": True, "reason": "invented a timeframe"},
+        }
+    )
+    check("failed draft: says it failed verification", "failed verification" in failed, True)
+    check("no retrieval -> empty section", _coverage_section({"response_language": "en"}), "")
+
+
 def check_citation_stripping() -> None:
     """`deliver_answer` honors the STRIP_CITATION_MARKERS toggle.
 
@@ -370,6 +405,8 @@ def main() -> int:
     check_routing()
     print("\nunresolved notes for the ticket agent:")
     check_unresolved_notes()
+    print("\ncoverage section for the ticket description:")
+    check_coverage_section()
     print("\nciting toggle (deliver_answer):")
     check_citation_stripping()
     print("\nfinalize_turn:")
