@@ -13,7 +13,7 @@ What is being borrowed from RAGent2, and why it is worth the coupling:
     URL, the transport retry budget, the request timeout; and
   * `invoke_structured`'s repair loop for Groq's `json_validate_failed` 400,
     where the model emits JSON its own schema rejects. That failure was
-    observed live during Phase 1 ingestion, and the loop re-serializes the
+    observed live during ingestion, and the loop re-serializes the
     rejected output rather than redoing the work.
 
 Both default to `settings.answer_model`. Callers pass a `ragent2.config.Settings`
