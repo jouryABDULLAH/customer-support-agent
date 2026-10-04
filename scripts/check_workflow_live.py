@@ -13,8 +13,8 @@ Scenarios:
     A  greeting/thanks bypass retrieval
     B  supported single question -> grounded answer
     C  supported multi-question -> one grounded answer
-    D  mixed HIGH + LOW -> no answer, ticket created
-    E  grounding failure -> ticket created
+    D  mixed HIGH + LOW -> no answer, ticket drafted, submitted on approval
+    E  grounding failure -> ticket drafted
     F  customer and messages persist across turns, threads and restarts
     G  ticket trusted fields are correct
     H  the reply is in the customer's language
@@ -42,6 +42,7 @@ from customer_support.rag.answer import detect_language
 from customer_support.rag.client import get_rag
 from customer_support.schemas import GroundingResult
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 
 FIXTURE_CUSTOMER_ID = "TEST-CUSTOMER-001"
 RUN = uuid.uuid4().hex[:8]
@@ -77,8 +78,11 @@ class CountingTenant:
         return self._tenant.search(question, *args, **kwargs)
 
 
-def run_turn(message: str, thread_id: str, count_searches: bool = False) -> tuple[dict, dict, list[str]]:
-    """One graph invocation. Returns (final state, node updates, searched questions)."""
+def run_turn(
+    message: str | Command, thread_id: str, count_searches: bool = False
+) -> tuple[dict, dict, list[str]]:
+    """One graph invocation: a customer message, or a `Command` resuming an
+    approval. Returns (final state, node updates, searched questions)."""
     graph = build_graph()
     config = {"configurable": {"thread_id": thread_id}}
     context = Context(customer_id=FIXTURE_CUSTOMER_ID)
@@ -91,7 +95,8 @@ def run_turn(message: str, thread_id: str, count_searches: bool = False) -> tupl
     try:
         updates: dict[str, dict] = {}
         for step in graph.stream(
-            {"messages": [{"role": "user", "content": message}]},
+            message if isinstance(message, Command)
+            else {"messages": [{"role": "user", "content": message}]},
             config=config,
             context=context,
             stream_mode="updates",
@@ -170,9 +175,11 @@ def scenario_c() -> None:
 
 
 def scenario_d() -> None:
-    """One supported and one unsupported question: no answer, a ticket."""
+    """One supported and one unsupported question: no answer, a drafted
+    ticket, filed once the customer asks for it and approves."""
     message = "كم سعر الباقة البرونزية؟ وهل يمكن ربط مسجات مع Salesforce؟"
-    state, updates, searched = run_turn(message, f"D-{RUN}", count_searches=True)
+    thread = f"D-{RUN}"
+    state, updates, searched = run_turn(message, thread, count_searches=True)
     retrieval = updates["search_subquestions"]["retrieval"]
 
     print(f"  decomposed -> {updates['decompose_question']['questions']}")
@@ -187,7 +194,21 @@ def scenario_d() -> None:
     check("no answer was generated", "generate_answer" in updates, False)
     check("verification never ran", "verify" in updates, False)
     check("ticket agent ran", "ticket_agent" in updates, True)
+    check("a draft was proposed", state.get("ticket_draft") is not None, True)
+    check("no ticket before approval", state["ticket_id"], None)
+
+    _, updates, _ = run_turn("نعم، أرسل التذكرة", thread)
+    check("routed to the ticket assistant", updates["router"]["route"], "manage_ticket")
+    pending = updates.get("__interrupt__")
+    check(
+        "submission waits for approval",
+        [action["name"] for action in pending[0].value["action_requests"]] if pending else [],
+        ["submit_draft"],
+    )
+    state, _, _ = run_turn(Command(resume={"decisions": [{"type": "approve"}]}), thread)
+    print(f"  submitted  -> {state['final_response'][:120]}")
     check("a ticket was created", bool(state["ticket_id"]), True)
+    check("the draft is cleared", state.get("ticket_draft"), None)
     check(
         "the reply names the ticket",
         bool(state["ticket_id"]) and state["ticket_id"] in state["final_response"],
@@ -383,7 +404,7 @@ def scenario_e() -> None:
     )
     check("the draft was not delivered", "deliver_answer" in updates, False)
     check("escalated to the ticket agent", "ticket_agent" in updates, True)
-    check("a ticket was created", bool(state["ticket_id"]), True)
+    check("a ticket was drafted", state.get("ticket_draft") is not None, True)
     check(
         "the unverified draft never reached the customer",
         "money-back" in state["final_response"],
