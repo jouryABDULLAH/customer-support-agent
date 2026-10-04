@@ -54,20 +54,18 @@ logger = logging.getLogger(__name__)
 
 # The customer-facing proposal for an escalated turn. Deterministic text, not
 # a generated one: it makes no claim about the product, so there is nothing
-# here for a model to get wrong, and the draft must appear exactly as it will
-# be filed.
+# here for a model to get wrong. The draft itself is not in it -- the UI shows
+# the pending draft in its own box, from state.
 _TICKET_PROPOSAL = {
     "ar": (
         "لم أتمكن من الإجابة على استفسارك من المصادر المعتمدة لدي، "
-        "لذلك جهّزت مسودة تذكرة دعم:\n\n"
-        "**الموضوع:** {subject}  \n**الفئة:** {category}\n\n{problem_description}\n\n"
-        "هل ترغب بإرسالها؟ يمكنك أيضاً أن تطلب مني تعديل أي جزء منها."
+        "لذلك جهّزت مسودة تذكرة دعم. هل ترغب بإرسالها؟ "
+        "يمكنك أيضاً أن تطلب مني تعديل أي جزء منها."
     ),
     "en": (
         "I could not answer your question from my approved sources, so I have "
-        "drafted a support ticket:\n\n"
-        "**Subject:** {subject}  \n**Category:** {category}\n\n{problem_description}\n\n"
-        "Shall I submit it? You can also ask me to change any part of it."
+        "drafted a support ticket. Shall I submit it? You can also ask me to "
+        "change any part of it."
     ),
 }
 
@@ -491,12 +489,7 @@ def propose_ticket(state: State) -> dict:
     reply -- submit, change something, or drop it -- goes to
     `ticket_assistant` on the next turn.
     """
-    draft = state["ticket_draft"]
-    text = _TICKET_PROPOSAL[_language(state)].format(
-        subject=draft["subject"],
-        category=draft["category"],
-        problem_description=draft["problem_description"],
-    )
+    text = _TICKET_PROPOSAL[_language(state)]
     return {"final_response": text, "messages": [AIMessage(content=text)]}
 
 

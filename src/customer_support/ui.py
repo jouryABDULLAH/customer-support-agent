@@ -34,6 +34,7 @@ from customer_support.db.customers import (
 from customer_support.db.tickets import list_tickets
 from customer_support.graph import Context, build_graph
 from customer_support.observability import configure_logging, configure_tracing
+from customer_support.rag.answer import detect_language
 from customer_support.rag.client import get_rag
 
 logger = logging.getLogger(__name__)
@@ -159,6 +160,7 @@ _APPROVAL_TEXT = {
         "submit_draft": "إرسال تذكرة الدعم",
         "update_ticket": "تعديل التذكرة {ticket_id}",
         "cancel_ticket": "إلغاء التذكرة {ticket_id}",
+        "draft": "مسودة التذكرة",
         "category": "الفئة",
         "subject": "الموضوع",
         "problem_description": "وصف المشكلة",
@@ -170,6 +172,7 @@ _APPROVAL_TEXT = {
         "submit_draft": "Submit the support ticket",
         "update_ticket": "Change ticket {ticket_id}",
         "cancel_ticket": "Cancel ticket {ticket_id}",
+        "draft": "Ticket draft",
         "category": "Category",
         "subject": "Subject",
         "problem_description": "Problem description",
@@ -206,6 +209,28 @@ def _run_turn(graph, graph_input, config: dict, customer: dict) -> None:
         st.error(f"Something went wrong handling this request: {error}")
 
 
+def _ticket_fields(fields: dict, text: dict) -> None:
+    """A ticket's editable fields, labelled; absent ones are skipped."""
+    for name in ("category", "subject", "problem_description"):
+        if fields.get(name):
+            st.caption(text[name])
+            st.markdown(fields[name])
+
+
+def draft_box(draft: dict) -> None:
+    """The pending ticket draft, in its own box below the conversation.
+
+    Read from state on every render, so it always shows the draft as it is
+    now -- the replies only say what changed. Labelled in the draft's own
+    language: the turn's `response_language` is cleared by the time this
+    renders.
+    """
+    text = _APPROVAL_TEXT[detect_language(draft["subject"] + " " + draft["problem_description"])]
+    with st.container(border=True):
+        st.markdown(f"**{text['draft']}**")
+        _ticket_fields(draft, text)
+
+
 def approval_card(graph, snapshot, config: dict, customer: dict) -> None:
     """The ticket assistant's pending action(s), with approve / reject.
     Replaces the request form while pending: the turn is not over until the
@@ -223,10 +248,7 @@ def approval_card(graph, snapshot, config: dict, customer: dict) -> None:
             fields = (snapshot.values.get("ticket_draft") or {}) if action["name"] == "submit_draft" else args
             with st.container(border=True):
                 st.markdown(f"**{text[action['name']].format(ticket_id=args.get('ticket_id'))}**")
-                for name in ("category", "subject", "problem_description"):
-                    if fields.get(name):
-                        st.caption(text[name])
-                        st.markdown(fields[name])
+                _ticket_fields(fields, text)
         approve, reject, _ = st.columns([1, 1, 2])
         approved = approve.button(text["approve"], type="primary", use_container_width=True)
         rejected = reject.button(text["reject"], use_container_width=True)
@@ -266,6 +288,10 @@ def request_tab(graph, customer: dict) -> None:
     if snapshot.interrupts:
         approval_card(graph, snapshot, config, customer)
         return
+
+    draft = snapshot.values.get("ticket_draft")
+    if draft:
+        draft_box(draft)
 
     # Ticket acknowledgment and evidence belong to the latest response only.
     last_turn = st.session_state.get("last_turn")

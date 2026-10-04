@@ -31,6 +31,24 @@ if "submitted" not in st.session_state:
 '''
 
 
+DRAFT_APP = '''
+from customer_support.ui import draft_box
+
+draft_box({"subject": "طلب تجميد الحساب", "category": "account",
+           "problem_description": "العميل يطلب تجميد حسابه."})
+'''
+
+
+class DraftBoxUITests(unittest.TestCase):
+    def test_shows_the_draft_labelled_in_its_language(self):
+        app = AppTest.from_string(DRAFT_APP, default_timeout=30).run()
+        self.assertFalse(app.exception)
+        shown = [element.value for element in app.markdown]
+        self.assertIn("**مسودة التذكرة**", shown)
+        self.assertIn("طلب تجميد الحساب", shown)
+        self.assertIn("العميل يطلب تجميد حسابه.", shown)
+
+
 class ApprovalCardUITests(unittest.TestCase):
     def test_shows_the_draft_being_submitted(self):
         app = AppTest.from_string(APP, default_timeout=30).run()
