@@ -122,18 +122,28 @@ def _customer_message(state: State) -> str:
     raise ValueError("No customer message in this thread; nothing to act on.")
 
 
-def _previous_reply(state: State) -> str:
-    """What the agent last said to the customer before this turn's message.
+# How many earlier messages (customer and agent) the router sees: about four
+# exchanges -- enough for a follow-up, and a flat cost however long the thread.
+_ROUTER_HISTORY_MESSAGES = 8
 
-    Skips tool calls, which the customer never saw. Empty on a first turn.
+
+def _recent_conversation(state: State) -> str:
+    """The exchanges before this turn's message, as the customer saw them.
+
+    Tool calls and their results are skipped -- the customer never saw them.
+    Empty on a first turn.
     """
-    seen_customer = False
-    for message in reversed(state["messages"]):
-        if isinstance(message, HumanMessage):
-            seen_customer = True
-        elif seen_customer and isinstance(message, AIMessage) and message.content and not message.tool_calls:
-            return str(message.content)
-    return ""
+    visible = [
+        message
+        for message in state["messages"]
+        if isinstance(message, HumanMessage)
+        or (isinstance(message, AIMessage) and message.content and not message.tool_calls)
+    ]
+    earlier = visible[:-1][-_ROUTER_HISTORY_MESSAGES:]
+    return "\n\n".join(
+        f"{'Customer' if isinstance(message, HumanMessage) else 'Agent'}: {message.content}"
+        for message in earlier
+    )
 
 
 def _language(state: State) -> str:
@@ -205,7 +215,7 @@ def router(state: State) -> dict:
                 "role": "user",
                 "content": (
                     f"PENDING TICKET DRAFT: {pending}\n\n"
-                    f"PREVIOUS REPLY: {_previous_reply(state) or '(none)'}\n\n"
+                    f"RECENT CONVERSATION:\n{_recent_conversation(state) or '(none)'}\n\n"
                     f"Message: {_customer_message(state)}"
                 ),
             },

@@ -11,7 +11,7 @@ Uses the real `data/app.db` (the node reads `APP_DB_PATH`).
 
 import uuid
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
 
 from customer_support.db.connection import connect, migrate
@@ -21,6 +21,7 @@ from customer_support.graph.checkpoint import get_checkpointer
 from customer_support.graph import nodes as graph_nodes
 from customer_support.graph.nodes import (
     _coverage_section,
+    _recent_conversation,
     _unresolved_notes,
     deliver_answer,
     finalize_turn,
@@ -263,6 +264,25 @@ def check_unresolved_notes() -> None:
     check("unanswered: says no reply was sent", "no reply was sent" in unanswered, True)
 
 
+def check_recent_conversation() -> None:
+    check("first turn -> empty", _recent_conversation({"messages": [HumanMessage("q")]}), "")
+
+    messages = [HumanMessage(f"c{i}") if i % 2 == 0 else AIMessage(f"a{i}") for i in range(12)]
+    messages += [
+        AIMessage("", tool_calls=[{"name": "edit_draft", "args": {}, "id": "1"}]),
+        ToolMessage("Draft updated.", tool_call_id="1"),
+        AIMessage("a12"),
+        HumanMessage("current"),
+    ]
+    window = _recent_conversation({"messages": messages})
+    lines = window.split("\n\n")
+    check("keeps the last 8 visible messages", len(lines), 8)
+    check("labels the speakers", lines[-1], "Agent: a12")
+    check("excludes the message being classified", "current" in window, False)
+    check("skips tool calls and results", "Draft updated." in window, False)
+    check("drops older messages", "c0" in window, False)
+
+
 def check_coverage_section() -> None:
     mixed = _coverage_section(
         {"response_language": "en", "retrieval": retrieval(("kept", "high"), ("lost", "low"))}
@@ -406,6 +426,8 @@ def main() -> int:
     check_unresolved_notes()
     print("\ncoverage section for the ticket description:")
     check_coverage_section()
+    print("\nrouter conversation window:")
+    check_recent_conversation()
     print("\nciting toggle (deliver_answer):")
     check_citation_stripping()
     print("\nfinalize_turn:")

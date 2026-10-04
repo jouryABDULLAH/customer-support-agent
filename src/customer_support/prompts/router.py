@@ -32,14 +32,16 @@ tickets rather than about the company:
   asking to change its subject, category or description;
 - asking about tickets they already submitted -- their status, their
   contents -- or asking to change or cancel one.
-- PREVIOUS REPLY asked the customer something about a ticket, and the
-  message answers it -- even with a single word or a name.
+- the message continues a ticket exchange in RECENT CONVERSATION -- for
+  example it answers the agent's question about a ticket, even with a single
+  word or a name, or refers back to a ticket ("the second one", "change it
+  back").
 A new question about the company is "retrieve_evidence" even while a draft
 is pending.
 
-Use PREVIOUS REPLY only to tell whether the message continues that exchange.
-Never classify from PREVIOUS REPLY alone, and never take the response
-language from it.
+You classify Message only. Use RECENT CONVERSATION to understand what
+Message means, never to classify an earlier message, and never take the
+response language from it.
 </next_step>
 
 <response_language>
@@ -79,7 +81,22 @@ Message: Make the subject shorter and mention the API
 next_step: manage_ticket, response_language: en
 
 PENDING TICKET DRAFT: yes
-PREVIOUS REPLY: ما الاسم الذي تريد إضافته إلى موضوع التذكرة؟
+RECENT CONVERSATION:
+Customer: ابي اغير الموضوع
+Agent: ما هو الموضوع الجديد الذي تريده؟
+Message: مشكلة في تجميد الحساب
+next_step: manage_ticket, response_language: ar
+
+PENDING TICKET DRAFT: yes
+RECENT CONVERSATION:
+Customer: غيّر الفئة إلى billing
+Agent: تم تغيير الفئة. هل ترغب بإرسالها؟
+Message: كم سعر الباقة الفضية؟
+next_step: retrieve_evidence, response_language: ar
+
+PENDING TICKET DRAFT: yes
+RECENT CONVERSATION:
+Agent: ما الاسم الذي تريد إضافته إلى موضوع التذكرة؟
 Message: جوري
 next_step: manage_ticket, response_language: ar
 
