@@ -31,36 +31,31 @@ streamlit run src/customer_support/ui.py
 
 CLI alternative: `python scripts/run_workflow.py "your message"`.
 
-When the UI escalates a request, the graph pauses for ticket review. Edit the
-subject, category, and problem description, then choose **Open ticket**, or
-decline to finish without creating one. Customer identity and the original
-request remain application-controlled; retrieval coverage is appended when saved.
+When a request cannot be answered, the agent drafts a ticket and shows it in
+the conversation; nothing is filed yet. Reply in the chat to change any part
+of it, submit it, or drop it. The same conversation handles tickets already
+submitted: ask about them, change their category, subject or description, or
+cancel them. Only OPEN tickets can be changed.
+
+Every action that writes a ticket -- submitting, changing, cancelling -- pauses
+for approval, and the UI shows **Approve** / **Reject**. Customer identity and
+the original request remain application-controlled; retrieval coverage is
+appended when the ticket is submitted.
 
 API callers resume the pending checkpoint using the same `thread_id`:
 
 ```python
 from langgraph.types import Command
 
-graph.invoke(Command(resume={
-    "approved": True,
-    "ticket_draft": {
-        "category": "billing",
-        "subject": "Corrected subject",
-        "problem_description": "Corrected problem description",
-    },
-}), config=config)
+graph.invoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config, context=context)
 ```
 
-Use `{"approved": False}` to decline, or `{"approved": True}` to approve
-unchanged. Invalid input pauses again for correction. The implementation follows
-[LangGraph's interrupt rules](https://docs.langchain.com/oss/python/langgraph/interrupts):
-one JSON-serializable interrupt in a dedicated node, outside exception handlers,
-with ticket creation in a separate node after approval.
+Use `{"type": "reject"}` to refuse; the agent then asks what to do instead.
 
 ## Checks
 
 ```powershell
 python scripts/check.py             # offline suites, no services needed
 python scripts/check.py --live      # full end-to-end suite
-python -m unittest discover -s tests -v  # ticket review and Streamlit form checks
+python -m unittest discover -s tests -v  # ticket assistant and approval card checks
 ```
