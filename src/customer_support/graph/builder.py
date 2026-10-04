@@ -18,6 +18,7 @@ changes.
               |                     '- (fail, again) --.        |
               '- (needs_escalation) ------------ ticket_agent   |
                                                  -> confirm_ticket
+                                                    |- (invalid) confirm_ticket
                                                     |- (approved) create_ticket
                                                     '- (declined) decline_ticket
       -> finalize_turn -> END
@@ -86,7 +87,7 @@ def build_graph(checkpointer=None):
     builder.add_conditional_edges(
         "confirm_ticket",
         routing.route_after_confirmation,
-        ["create_ticket", "decline_ticket"],
+        ["confirm_ticket", "create_ticket", "decline_ticket"],
     )
     builder.add_edge("create_ticket", "finalize_turn")
     builder.add_edge("decline_ticket", "finalize_turn")

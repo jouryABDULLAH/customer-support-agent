@@ -77,12 +77,13 @@ def route_after_verification(
     return "ticket_agent"
 
 
-def route_after_confirmation(state: State) -> Literal["create_ticket", "decline_ticket"]:
+def route_after_confirmation(state: State) -> Literal["confirm_ticket", "create_ticket", "decline_ticket"]:
     """Create the ticket only on an explicit approval.
 
-    Anything other than `True` -- including a missing answer -- declines: a
-    ticket the customer did not agree to is exactly what this step prevents.
+    Invalid input re-prompts; only a validated approval may create a ticket.
     """
+    if state.get("ticket_review_error"):
+        return "confirm_ticket"
     if state.get("ticket_approved") is True:
         return "create_ticket"
     return "decline_ticket"

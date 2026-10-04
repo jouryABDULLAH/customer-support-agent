@@ -19,6 +19,7 @@ import logging
 import threading
 import uuid
 from contextlib import closing
+from typing import get_args
 
 import streamlit as st
 from langgraph.types import Command
@@ -35,6 +36,7 @@ from customer_support.db.tickets import list_tickets
 from customer_support.graph import Context, build_graph
 from customer_support.observability import configure_logging, configure_tracing
 from customer_support.rag.client import get_rag
+from customer_support.schemas import TicketCategory
 
 logger = logging.getLogger(__name__)
 
@@ -155,11 +157,21 @@ def header_bar() -> None:
 # customer-facing reply.
 _APPROVAL_TEXT = {
     "ar": {
+        "edit": "يمكنك تعديل تفاصيل التذكرة قبل فتحها.",
+        "subject": "الموضوع",
+        "category": "الفئة",
+        "description": "وصف المشكلة",
+        "invalid": "يرجى إدخال موضوع ووصف للمشكلة واختيار فئة صحيحة ثم المحاولة مجدداً.",
         "prompt": "لم أجد إجابة لاستفسارك في المصادر المعتمدة. هل ترغب بفتح تذكرة دعم ليتابعها أحد المختصين؟",
         "approve": "فتح التذكرة",
         "decline": "لا، شكراً",
     },
     "en": {
+        "edit": "You can edit the ticket details before opening it.",
+        "subject": "Subject",
+        "category": "Category",
+        "description": "Problem description",
+        "invalid": "Enter a subject and problem description, select a valid category, and try again.",
         "prompt": "I couldn't find an answer in my approved sources. Open a support ticket so a specialist can follow up?",
         "approve": "Open ticket",
         "decline": "No thanks",
@@ -195,24 +207,46 @@ def _run_turn(graph, graph_input, config: dict, customer: dict) -> None:
 
 
 def approval_card(graph, snapshot, config: dict, customer: dict) -> None:
-    """The drafted ticket, with approve / decline. Replaces the request form
+    """Editable ticket draft, with approve / decline. Replaces the request form
     while it is pending: the turn is not over until the customer answers."""
-    draft = snapshot.interrupts[0].value
+    pending = snapshot.interrupts[0]
+    draft = pending.value
     text = _APPROVAL_TEXT[snapshot.values.get("response_language") or "ar"]
 
     st.caption("Response")
     with st.container(border=True):
         st.markdown(text["prompt"])
-        with st.container(border=True):
-            st.markdown(f"**{draft['subject']}**")
-            st.caption(draft["category"])
-            st.markdown(draft["problem_description"])
-        approve, decline, _ = st.columns([1, 1, 2])
-        approved = approve.button(text["approve"], type="primary", use_container_width=True)
-        declined = decline.button(text["decline"], use_container_width=True)
+        st.caption(text["edit"])
+        if draft.get("error"):
+            st.error(text["invalid"])
+        # Scope widgets to this review so reruns retain edits, while another
+        # conversation or ticket gets its own initial values.
+        review_key = f"ticket_review_{config['configurable']['thread_id']}_{pending.id}"
+        with st.form(review_key):
+            subject = st.text_input(text["subject"], value=draft["subject"])
+            categories = get_args(TicketCategory)
+            category = st.selectbox(
+                text["category"], categories, index=categories.index(draft["category"])
+            )
+            description = st.text_area(
+                text["description"], value=draft["problem_description"], height=180
+            )
+            approve, decline, _ = st.columns([1, 1, 2])
+            approved = approve.form_submit_button(text["approve"], type="primary", use_container_width=True)
+            declined = decline.form_submit_button(text["decline"], use_container_width=True)
 
     if approved or declined:
-        _run_turn(graph, Command(resume=approved), config, customer)
+        if approved and not (subject.strip() and description.strip()):
+            st.error(text["invalid"])
+            return
+        response = {"approved": approved}
+        if approved:
+            response["ticket_draft"] = {
+                "subject": subject,
+                "category": category,
+                "problem_description": description,
+            }
+        _run_turn(graph, Command(resume=response), config, customer)
         st.rerun()
 
 
@@ -333,4 +367,5 @@ def main() -> None:
         tickets_tab(customer)
 
 
-main()
+if __name__ == "__main__":
+    main()

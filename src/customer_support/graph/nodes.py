@@ -28,6 +28,7 @@ from contextlib import closing
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
 from langgraph.types import interrupt
+from pydantic import ValidationError
 
 from customer_support.config import STRIP_CITATION_MARKERS, TICKET_PRODUCT
 from customer_support.db.connection import connect
@@ -48,7 +49,7 @@ from customer_support.rag.client import get_rag
 from customer_support.rag.decompose import decompose
 from customer_support.rag.schema import EvidenceItem
 from customer_support.rag.search import low_confidence_questions, search_questions
-from customer_support.schemas import GroundingResult, RouteDecision, TicketDraft
+from customer_support.schemas import GroundingResult, RouteDecision, TicketDraft, TicketReview
 
 logger = logging.getLogger(__name__)
 
@@ -430,21 +431,31 @@ def ticket_agent(state: State) -> dict:
     logger.info("ticket_agent: category=%s subject=%r", draft.category, draft.subject)
     return {"ticket_draft": draft.model_dump()}
 
-def confirm_ticket(): # calls interrupt({...ticket_draft}) , recieves approved: bool.
-    # approved -> create_ticket
-    # rejected -> small node the sends a fixed "no ticket opened" message. -> finalize_turn 
-    pass
-
 def confirm_ticket(state: State) -> dict:
-    """Pause for the customer to approve or decline the drafted ticket.
+    """Pause for review, edits, and explicit approval of the drafted ticket.
 
     A node of its own so that resuming -- which re-runs the paused node from
     the top -- does not repeat the `ticket_agent` model call. The interrupt
-    payload is the draft; the resume value is the customer's `approved: bool`.
+    payload and resume value are plain JSON data. Invalid input returns to
+    this node via a conditional edge, with one interrupt per invocation.
     """
-    approved = bool(interrupt(state["ticket_draft"]))
-    logger.info("confirm_ticket: approved=%s", approved)
-    return {"ticket_approved": approved}
+    response = interrupt({
+        **state["ticket_draft"],
+        "error": state.get("ticket_review_error"),
+    })
+    
+    if type(response) is bool:  # Retain approval-only clients.
+        response = {"approved": response}
+    try:
+        review = TicketReview.model_validate(response)
+    except ValidationError:
+        return {"ticket_approved": None, "ticket_review_error": "invalid_review"}
+
+    update = {"ticket_approved": review.approved, "ticket_review_error": None}
+    if review.approved and review.ticket_draft is not None:
+        update["ticket_draft"] = review.ticket_draft.model_dump()
+    logger.info("confirm_ticket: approved=%s", review.approved)
+    return update
 
 
 def decline_ticket(state: State) -> dict:
@@ -565,4 +576,5 @@ def finalize_turn(state: State) -> dict:
         "answer_revision_count": 0,
         "ticket_draft": None,
         "ticket_approved": None,
+        "ticket_review_error": None,
     }

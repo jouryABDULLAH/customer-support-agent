@@ -16,9 +16,9 @@ Pydantic model, then stores `.model_dump()`. Retrieval schemas are the one
 exception -- in `rag/schema.py`.
 """
 
-from typing import Literal, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictBool, StringConstraints
 
 # The taxonomy a ticket is filed under. Constrained here rather than in the
 # database (migration 001 leaves `category` plain TEXT) because it is the
@@ -104,3 +104,19 @@ class TicketDraftState(TypedDict):
     category: str
     subject: str
     problem_description: str
+
+
+class ReviewedTicketDraft(TicketDraft):
+    """Editable fields submitted by a customer; blank text is invalid."""
+
+    subject: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    problem_description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+class TicketReview(BaseModel):
+    """Explicit approval with optional edits, never trusted ticket metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    approved: StrictBool
+    ticket_draft: ReviewedTicketDraft | None = None

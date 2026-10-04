@@ -54,6 +54,7 @@ EXPECTED_EDGES = {
     ("deliver_answer", "finalize_turn"),
     ("ticket_agent", "confirm_ticket"),
     ("confirm_ticket", "create_ticket"),
+    ("confirm_ticket", "confirm_ticket"),
     ("confirm_ticket", "decline_ticket"),
     ("create_ticket", "finalize_turn"),
     ("decline_ticket", "finalize_turn"),
@@ -129,6 +130,7 @@ def check_structure() -> None:
             ("verify", "revise_answer"),
             ("verify", "ticket_agent"),
             ("confirm_ticket", "create_ticket"),
+            ("confirm_ticket", "confirm_ticket"),
             ("confirm_ticket", "decline_ticket"),
         },
     )
@@ -333,7 +335,7 @@ def check_finalize_turn() -> None:
     )
     for field in (
         "route", "response_language", "questions", "retrieval",
-        "answer_draft", "grounding", "ticket_draft",
+        "answer_draft", "grounding", "ticket_draft", "ticket_approved", "ticket_review_error",
     ):
         check(f"clears {field}", answered[field], None)
     check("clears answer_revision_count to 0", answered["answer_revision_count"], 0)
