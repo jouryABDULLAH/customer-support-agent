@@ -77,6 +77,31 @@ def list_tickets(
     ).fetchall()
 
 
+def update_ticket(
+    conn: sqlite3.Connection,
+    ticket_id: str,
+    category: str | None = None,
+    subject: str | None = None,
+    problem_description: str | None = None,
+) -> bool:
+    """Change a ticket's drafted fields; `None` leaves a field as it is.
+
+    Returns False if the ticket does not exist.
+    """
+    cursor = conn.execute(
+        """
+        UPDATE tickets SET
+            category = COALESCE(?, category),
+            subject = COALESCE(?, subject),
+            problem_description = COALESCE(?, problem_description)
+        WHERE id = ?
+        """,
+        (category, subject, problem_description, ticket_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
 def update_ticket_status(
     conn: sqlite3.Connection, ticket_id: str, status: str
 ) -> bool:
