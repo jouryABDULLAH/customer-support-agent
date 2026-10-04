@@ -102,7 +102,7 @@ class TicketAssistantTests(unittest.TestCase):
         with SqliteSaver.from_conn_string(self.checkpoints) as saver:
             result = self.say(build_graph(saver), QUESTION)
         self.assertNotIn("__interrupt__", result)
-        self.assertIn(DRAFT["subject"], result["final_response"])
+        self.assertIn("drafted a support ticket", result["final_response"])
         self.assertEqual(result["ticket_draft"]["original_message"], QUESTION)
         self.assertIn(QUESTION, result["ticket_draft"]["coverage"])
         self.assertIsNone(result["ticket_id"])
@@ -111,16 +111,18 @@ class TicketAssistantTests(unittest.TestCase):
     def test_edited_draft_is_filed_only_after_approval(self):
         self.script = [
             call("edit_draft", subject="Salesforce API integration"),
-            AIMessage(content="Updated. Submit it?"),
             call("submit_draft"),
-            AIMessage(content="Submitted."),
         ]
         with SqliteSaver.from_conn_string(self.checkpoints) as saver:
             graph = build_graph(saver)
             self.say(graph, QUESTION)
             edited = self.say(graph, "ticket: make the subject about the Salesforce API")
             self.assertEqual(edited["ticket_draft"]["subject"], "Salesforce API integration")
-            self.assertEqual(edited["final_response"], "Updated. Submit it?")
+            # The reply is the template, not the model: `edit_draft` is
+            # `return_direct`, so the agent never gets another turn to speak.
+            self.assertEqual(
+                edited["final_response"], "I changed the subject. Shall I submit the ticket?"
+            )
 
             paused = self.say(graph, "ticket: submit it")
             request = paused["__interrupt__"][0].value["action_requests"]
@@ -135,7 +137,9 @@ class TicketAssistantTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(result["ticket_id"], rows[0]["id"])
         self.assertIsNone(result["ticket_draft"])
-        self.assertEqual(result["final_response"], "Submitted.")
+        # The reply is the template, not the model: `submit_draft` is
+        # `return_direct`, so the agent never gets another turn to speak.
+        self.assertEqual(result["final_response"], f"Submitted as ticket {rows[0]['id']}.")
         self.assertEqual(rows[0]["subject"], "Salesforce API integration")
         self.assertEqual(rows[0]["customer_id"], "customer-1")
         self.assertEqual(rows[0]["original_message"], QUESTION)
@@ -144,7 +148,7 @@ class TicketAssistantTests(unittest.TestCase):
         self.assertIn(QUESTION, rows[0]["problem_description"])
 
     def test_rejected_submission_keeps_the_draft(self):
-        self.script = [call("submit_draft"), AIMessage(content="Not submitted. What should change?")]
+        self.script = [call("submit_draft")]
         with SqliteSaver.from_conn_string(self.checkpoints) as saver:
             graph = build_graph(saver)
             self.say(graph, QUESTION)
@@ -159,42 +163,39 @@ class TicketAssistantTests(unittest.TestCase):
             ticket_id = create_ticket(conn, "customer-1", "MSEGAT", "other", "Old subject", "Old description", "msg")
         self.script = [
             call("update_ticket", ticket_id=ticket_id, subject="New subject", category="billing"),
-            AIMessage(content="Updated."),
             call("cancel_ticket", ticket_id=ticket_id),
-            AIMessage(content="Cancelled."),
             call("update_ticket", ticket_id=ticket_id, subject="Too late"),
-            AIMessage(content="It is closed."),
         ]
         with SqliteSaver.from_conn_string(self.checkpoints) as saver:
             graph = build_graph(saver)
             self.say(graph, "ticket: rename it and file it under billing")
             self.assertEqual(self.tickets()[0]["subject"], "Old subject")
-            self.resume(graph, APPROVE)
+            result = self.resume(graph, APPROVE)
             row = self.tickets()[0]
             self.assertEqual((row["subject"], row["category"]), ("New subject", "billing"))
             self.assertEqual(row["problem_description"], "Old description")
+            self.assertIn(ticket_id, result["final_response"])
 
             self.say(graph, "ticket: cancel it")
-            self.resume(graph, APPROVE)
+            result = self.resume(graph, APPROVE)
             self.assertEqual(self.tickets()[0]["status"], "CLOSED")
+            self.assertEqual(result["final_response"], f"Ticket {ticket_id} cancelled.")
 
             self.say(graph, "ticket: rename it again")
-            self.resume(graph, APPROVE)
+            result = self.resume(graph, APPROVE)
             self.assertEqual(self.tickets()[0]["subject"], "New subject")
+            self.assertIn("only OPEN tickets", result["final_response"])
 
     def test_another_customers_ticket_cannot_be_changed(self):
         with closing(connect(self.db)) as conn:
             ticket_id = create_ticket(conn, "customer-2", "MSEGAT", "other", "Theirs", "Their description", "msg")
-        self.script = [
-            call("cancel_ticket", ticket_id=ticket_id),
-            AIMessage(content="No such ticket."),
-        ]
+        self.script = [call("cancel_ticket", ticket_id=ticket_id)]
         with SqliteSaver.from_conn_string(self.checkpoints) as saver:
             graph = build_graph(saver)
             self.say(graph, "ticket: cancel it")
             result = self.resume(graph, APPROVE)
         self.assertEqual(self.tickets()[0]["status"], "OPEN")
-        self.assertIn(f"no ticket {ticket_id}", result["messages"][-2].content)
+        self.assertIn(f"no ticket {ticket_id}", result["final_response"])
 
 
 if __name__ == "__main__":
