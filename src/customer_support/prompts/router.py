@@ -24,6 +24,22 @@ looked up and answered. Naming the company or a product inside an
 announcement does not create one.
 
 When a message contains both, choose "retrieve_evidence".
+
+Choose "manage_ticket" when the message is about the customer's support
+tickets rather than about the company:
+- PENDING TICKET DRAFT is "yes" and the message answers the drafted ticket:
+  agreeing or declining to submit it ("yes", "go ahead", "no thanks"), or
+  asking to change its subject, category or description;
+- asking about tickets they already submitted -- their status, their
+  contents -- or asking to change or cancel one.
+- PREVIOUS REPLY asked the customer something about a ticket, and the
+  message answers it -- even with a single word or a name.
+A new question about the company is "retrieve_evidence" even while a draft
+is pending.
+
+Use PREVIOUS REPLY only to tell whether the message continues that exchange.
+Never classify from PREVIOUS REPLY alone, and never take the response
+language from it.
 </next_step>
 
 <response_language>
@@ -53,4 +69,25 @@ next_step: respond_directly, response_language: ar
 
 Message: Can I ask you something about MSEGAT?
 next_step: respond_directly, response_language: en
+
+PENDING TICKET DRAFT: yes
+Message: نعم أرسلها
+next_step: manage_ticket, response_language: ar
+
+PENDING TICKET DRAFT: yes
+Message: Make the subject shorter and mention the API
+next_step: manage_ticket, response_language: en
+
+PENDING TICKET DRAFT: yes
+PREVIOUS REPLY: ما الاسم الذي تريد إضافته إلى موضوع التذكرة؟
+Message: جوري
+next_step: manage_ticket, response_language: ar
+
+PENDING TICKET DRAFT: no
+Message: ما حالة التذكرة اللي فتحتها أمس؟
+next_step: manage_ticket, response_language: ar
+
+PENDING TICKET DRAFT: no
+Message: Please cancel my billing ticket
+next_step: manage_ticket, response_language: en
 </examples>"""

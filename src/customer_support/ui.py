@@ -11,15 +11,14 @@ State ownership: LangGraph's checkpoint is the source of truth for the
 conversation -- messages are always re-read from `graph.get_state()` rather
 than mirrored in Streamlit. `st.session_state` holds only UI concerns: which
 customer is selected, the current thread id, and the last turn's evidence /
-ticket id for rendering. A ticket awaiting the customer's approval is read
-from the checkpoint's pending interrupt, not stored here.
+ticket id for rendering. A ticket action awaiting the customer's approval is
+read from the checkpoint's pending interrupt, not stored here.
 """
 
 import logging
 import threading
 import uuid
 from contextlib import closing
-from typing import get_args
 
 import streamlit as st
 from langgraph.types import Command
@@ -36,7 +35,6 @@ from customer_support.db.tickets import list_tickets
 from customer_support.graph import Context, build_graph
 from customer_support.observability import configure_logging, configure_tracing
 from customer_support.rag.client import get_rag
-from customer_support.schemas import TicketCategory
 
 logger = logging.getLogger(__name__)
 
@@ -157,24 +155,26 @@ def header_bar() -> None:
 # customer-facing reply.
 _APPROVAL_TEXT = {
     "ar": {
-        "edit": "يمكنك تعديل تفاصيل التذكرة قبل فتحها.",
-        "subject": "الموضوع",
+        "prompt": "يحتاج هذا الإجراء إلى موافقتك:",
+        "submit_draft": "إرسال تذكرة الدعم",
+        "update_ticket": "تعديل التذكرة {ticket_id}",
+        "cancel_ticket": "إلغاء التذكرة {ticket_id}",
         "category": "الفئة",
-        "description": "وصف المشكلة",
-        "invalid": "يرجى إدخال موضوع ووصف للمشكلة واختيار فئة صحيحة ثم المحاولة مجدداً.",
-        "prompt": "لم أجد إجابة لاستفسارك في المصادر المعتمدة. هل ترغب بفتح تذكرة دعم ليتابعها أحد المختصين؟",
-        "approve": "فتح التذكرة",
-        "decline": "لا، شكراً",
+        "subject": "الموضوع",
+        "problem_description": "وصف المشكلة",
+        "approve": "موافقة",
+        "reject": "رفض",
     },
     "en": {
-        "edit": "You can edit the ticket details before opening it.",
-        "subject": "Subject",
+        "prompt": "This action needs your approval:",
+        "submit_draft": "Submit the support ticket",
+        "update_ticket": "Change ticket {ticket_id}",
+        "cancel_ticket": "Cancel ticket {ticket_id}",
         "category": "Category",
-        "description": "Problem description",
-        "invalid": "Enter a subject and problem description, select a valid category, and try again.",
-        "prompt": "I couldn't find an answer in my approved sources. Open a support ticket so a specialist can follow up?",
-        "approve": "Open ticket",
-        "decline": "No thanks",
+        "subject": "Subject",
+        "problem_description": "Problem description",
+        "approve": "Approve",
+        "reject": "Reject",
     },
 }
 
@@ -207,46 +207,33 @@ def _run_turn(graph, graph_input, config: dict, customer: dict) -> None:
 
 
 def approval_card(graph, snapshot, config: dict, customer: dict) -> None:
-    """Editable ticket draft, with approve / decline. Replaces the request form
-    while it is pending: the turn is not over until the customer answers."""
-    pending = snapshot.interrupts[0]
-    draft = pending.value
+    """The ticket assistant's pending action(s), with approve / reject.
+    Replaces the request form while pending: the turn is not over until the
+    customer answers. Changes are asked for in conversation, not edited here."""
+    actions = snapshot.interrupts[0].value["action_requests"]
     text = _APPROVAL_TEXT[snapshot.values.get("response_language") or "ar"]
 
     st.caption("Response")
     with st.container(border=True):
         st.markdown(text["prompt"])
-        st.caption(text["edit"])
-        if draft.get("error"):
-            st.error(text["invalid"])
-        # Scope widgets to this review so reruns retain edits, while another
-        # conversation or ticket gets its own initial values.
-        review_key = f"ticket_review_{config['configurable']['thread_id']}_{pending.id}"
-        with st.form(review_key):
-            subject = st.text_input(text["subject"], value=draft["subject"])
-            categories = get_args(TicketCategory)
-            category = st.selectbox(
-                text["category"], categories, index=categories.index(draft["category"])
-            )
-            description = st.text_area(
-                text["description"], value=draft["problem_description"], height=180
-            )
-            approve, decline, _ = st.columns([1, 1, 2])
-            approved = approve.form_submit_button(text["approve"], type="primary", use_container_width=True)
-            declined = decline.form_submit_button(text["decline"], use_container_width=True)
+        for action in actions:
+            args = action["args"]
+            # A submission shows the draft it will file; the other actions
+            # show the fields they will write.
+            fields = (snapshot.values.get("ticket_draft") or {}) if action["name"] == "submit_draft" else args
+            with st.container(border=True):
+                st.markdown(f"**{text[action['name']].format(ticket_id=args.get('ticket_id'))}**")
+                for name in ("category", "subject", "problem_description"):
+                    if fields.get(name):
+                        st.caption(text[name])
+                        st.markdown(fields[name])
+        approve, reject, _ = st.columns([1, 1, 2])
+        approved = approve.button(text["approve"], type="primary", use_container_width=True)
+        rejected = reject.button(text["reject"], use_container_width=True)
 
-    if approved or declined:
-        if approved and not (subject.strip() and description.strip()):
-            st.error(text["invalid"])
-            return
-        response = {"approved": approved}
-        if approved:
-            response["ticket_draft"] = {
-                "subject": subject,
-                "category": category,
-                "problem_description": description,
-            }
-        _run_turn(graph, Command(resume=response), config, customer)
+    if approved or rejected:
+        decision = {"type": "approve" if approved else "reject"}
+        _run_turn(graph, Command(resume={"decisions": [decision] * len(actions)}), config, customer)
         st.rerun()
 
 
@@ -257,7 +244,7 @@ def request_tab(graph, customer: dict) -> None:
     Underneath it is still the same graph thread: one submitted request is one
     invocation on the current `thread_id`, and history is re-read from the
     checkpoint. A request becomes a ticket only when the graph escalates it
-    and the customer approves the drafted ticket.
+    and the customer approves submitting the drafted ticket.
     """
     config = {"configurable": {"thread_id": st.session_state["thread_id"]}}
     snapshot = graph.get_state(config)
@@ -265,7 +252,11 @@ def request_tab(graph, customer: dict) -> None:
     # The checkpoint is the conversation's source of truth; render from it.
     # Customer text gets its newlines preserved (markdown collapses single
     # ones); agent responses render as-is -- the model emits real markdown.
+    # The ticket assistant's tool calls and results are skipped: only what
+    # was said to the customer is shown.
     for message in snapshot.values.get("messages", []):
+        if message.type == "tool" or (message.type == "ai" and (message.tool_calls or not message.content)):
+            continue
         is_request = message.type == "human"
         st.caption("Request" if is_request else "Response")
         with st.container(border=True):

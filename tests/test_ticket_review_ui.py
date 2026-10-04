@@ -1,4 +1,4 @@
-"""Exercise the actual Streamlit review form without model or network calls."""
+"""Exercise the actual Streamlit approval card without model or network calls."""
 
 import unittest
 
@@ -16,10 +16,13 @@ def capture(graph, command, config, customer):
     st.session_state["submitted_thread"] = config["configurable"]["thread_id"]
 
 snapshot = SimpleNamespace(
-    values={"response_language": "en"},
+    values={"response_language": "en", "ticket_draft": {
+        "subject": "Draft subject", "category": "other",
+        "problem_description": "Draft description",
+    }},
     interrupts=[SimpleNamespace(id="review-1", value={
-        "subject": "Original subject", "category": "other",
-        "problem_description": "Original description",
+        "action_requests": [{"name": "submit_draft", "args": {}}],
+        "review_configs": [],
     })],
 )
 if "submitted" not in st.session_state:
@@ -28,31 +31,26 @@ if "submitted" not in st.session_state:
 '''
 
 
-class TicketReviewUITests(unittest.TestCase):
-    def test_form_submits_edited_fields_on_same_thread(self):
+class ApprovalCardUITests(unittest.TestCase):
+    def test_shows_the_draft_being_submitted(self):
         app = AppTest.from_string(APP, default_timeout=30).run()
         self.assertFalse(app.exception)
-        app.text_input[0].input("Edited subject")
-        app.selectbox[0].select("billing")
-        app.text_area[0].input("Edited problem")
+        shown = [element.value for element in app.markdown]
+        self.assertIn("Draft subject", shown)
+        self.assertIn("Draft description", shown)
+
+    def test_approve_resumes_on_the_same_thread(self):
+        app = AppTest.from_string(APP, default_timeout=30).run()
         app.button[0].click().run()
         self.assertFalse(app.exception)
-        self.assertEqual(app.session_state["submitted"], {
-            "approved": True,
-            "ticket_draft": {"subject": "Edited subject", "category": "billing", "problem_description": "Edited problem"},
-        })
+        self.assertEqual(app.session_state["submitted"], {"decisions": [{"type": "approve"}]})
         self.assertEqual(app.session_state["submitted_thread"], "thread-1")
 
-    def test_blank_subject_stays_editable_and_decline_still_works(self):
+    def test_reject_resumes_with_a_rejection(self):
         app = AppTest.from_string(APP, default_timeout=30).run()
-        app.text_input[0].input("   ")
-        app.button[0].click().run()
-        self.assertFalse(app.exception)
-        self.assertEqual(len(app.error), 1)
-        self.assertEqual(app.text_input[0].value, "   ")
         app.button[1].click().run()
         self.assertFalse(app.exception)
-        self.assertEqual(app.session_state["submitted"], {"approved": False})
+        self.assertEqual(app.session_state["submitted"], {"decisions": [{"type": "reject"}]})
 
 
 if __name__ == "__main__":

@@ -16,9 +16,9 @@ Pydantic model, then stores `.model_dump()`. Retrieval schemas are the one
 exception -- in `rag/schema.py`.
 """
 
-from typing import Annotated, Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StringConstraints
+from pydantic import BaseModel, ConfigDict
 
 # The taxonomy a ticket is filed under. Constrained here rather than in the
 # database (migration 001 leaves `category` plain TEXT) because it is the
@@ -51,7 +51,7 @@ class RouteDecision(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    next_step: Literal["respond_directly", "retrieve_evidence"]
+    next_step: Literal["respond_directly", "retrieve_evidence", "manage_ticket"]
     response_language: Literal["ar", "en"]
 
 
@@ -99,24 +99,16 @@ class TicketDraft(BaseModel):
 
 
 class TicketDraftState(TypedDict):
-    """`TicketDraft` as stored in graph state."""
+    """`TicketDraft` as stored in graph state, plus two fields the
+    application fixes at draft time.
+
+    The draft is submitted on a later turn, by which point that turn's
+    message and retrieval are gone; `original_message` and `coverage` keep
+    them. Neither is editable.
+    """
 
     category: str
     subject: str
     problem_description: str
-
-
-class ReviewedTicketDraft(TicketDraft):
-    """Editable fields submitted by a customer; blank text is invalid."""
-
-    subject: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-    problem_description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-
-
-class TicketReview(BaseModel):
-    """Explicit approval with optional edits, never trusted ticket metadata."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    approved: StrictBool
-    ticket_draft: ReviewedTicketDraft | None = None
+    original_message: str
+    coverage: str

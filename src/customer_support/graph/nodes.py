@@ -7,7 +7,7 @@ state to pick an edge.
 Three kinds, kept honestly apart:
 
 * **Deterministic** -- `load_customer_if_needed`, `search_subquestions`,
-  `deliver_answer`, `decline_ticket`, `create_ticket`, `finalize_turn`. No model is consulted
+  `deliver_answer`, `propose_ticket`, `finalize_turn`. No model is consulted
   where there is nothing to reason about.
 * **Focused LLM calls** -- `router`, `respond_directly`, `decompose_question`,
   `generate_answer`, `verify`, `ticket_agent`. One responsibility each; the
@@ -15,6 +15,8 @@ Three kinds, kept honestly apart:
   widen its own remit.
 * **Retrieval** -- `search_subquestions`, delegating to the `rag` package
   unchanged.
+
+The one agent, `ticket_assistant`, lives in `ticket_assistant.py`.
 
 Database connections are opened per call rather than held: `sqlite3`
 connections belong to the thread that created them, LangGraph may run nodes
@@ -27,13 +29,10 @@ from contextlib import closing
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
-from langgraph.types import interrupt
-from pydantic import ValidationError
 
-from customer_support.config import STRIP_CITATION_MARKERS, TICKET_PRODUCT
+from customer_support.config import STRIP_CITATION_MARKERS
 from customer_support.db.connection import connect
 from customer_support.db.customers import get_customer
-from customer_support.db.tickets import create_ticket as db_create_ticket
 from customer_support.graph.context import Context
 from customer_support.graph.state import State
 from customer_support.model import build_model, invoke_structured
@@ -49,43 +48,32 @@ from customer_support.rag.client import get_rag
 from customer_support.rag.decompose import decompose
 from customer_support.rag.schema import EvidenceItem
 from customer_support.rag.search import low_confidence_questions, search_questions
-from customer_support.schemas import GroundingResult, RouteDecision, TicketDraft, TicketReview
+from customer_support.schemas import GroundingResult, RouteDecision, TicketDraft
 
 logger = logging.getLogger(__name__)
 
-# The customer-facing acknowledgement for an escalated turn. Deterministic
-# text, not a generated one: it makes no claim about the product, so there is
-# nothing here for a model to get wrong, and the ticket id must appear
-# verbatim.
-_TICKET_ACK = {
+# The customer-facing proposal for an escalated turn. Deterministic text, not
+# a generated one: it makes no claim about the product, so there is nothing
+# here for a model to get wrong, and the draft must appear exactly as it will
+# be filed.
+_TICKET_PROPOSAL = {
     "ar": (
         "لم أتمكن من الإجابة على استفسارك من المصادر المعتمدة لدي، "
-        "لذلك أنشأت لك تذكرة دعم برقم {ticket_id}. "
-        "سيتواصل معك أحد مختصي الدعم لمتابعة طلبك."
+        "لذلك جهّزت مسودة تذكرة دعم:\n\n"
+        "**الموضوع:** {subject}  \n**الفئة:** {category}\n\n{problem_description}\n\n"
+        "هل ترغب بإرسالها؟ يمكنك أيضاً أن تطلب مني تعديل أي جزء منها."
     ),
     "en": (
         "I could not answer your question from my approved sources, so I have "
-        "opened support ticket {ticket_id} for you. A support specialist will "
-        "follow up with you."
+        "drafted a support ticket:\n\n"
+        "**Subject:** {subject}  \n**Category:** {category}\n\n{problem_description}\n\n"
+        "Shall I submit it? You can also ask me to change any part of it."
     ),
 }
 
-# The customer-facing reply when they decline the drafted ticket. Deterministic
-# for the same reason as `_TICKET_ACK`.
-_TICKET_DECLINED = {
-    "ar": (
-        "لم أتمكن من الإجابة على استفسارك من المصادر المعتمدة لدي، "
-        "ولم يتم فتح تذكرة دعم بناءً على طلبك."
-    ),
-    "en": (
-        "I could not answer your question from my approved sources, and no "
-        "support ticket was opened, as you requested."
-    ),
-}
-
-# Headings for the coverage section `create_ticket` appends to the ticket's
-# description, in the ticket's language. Deterministic for the same reason as
-# `_TICKET_ACK`: which questions the documents cover is already known from
+# Headings for the coverage section appended to the ticket's description, in
+# the ticket's language. Deterministic for the same reason as
+# `_TICKET_PROPOSAL`: which questions the documents cover is already known from
 # retrieval, and the ticket agent, left to restate it, flattened it into
 # "nothing was answerable".
 _TICKET_COVERAGE = {
@@ -128,12 +116,26 @@ def _customer_message(state: State) -> str:
 
     Scans back for the last human message rather than taking `messages[-1]`,
     so a node that runs after something has already been appended still reads
-    what the customer actually wrote. `create_ticket` stores this verbatim.
+    what the customer actually wrote. `ticket_agent` records this verbatim.
     """
     for message in reversed(state["messages"]):
         if isinstance(message, HumanMessage):
             return str(message.content)
     raise ValueError("No customer message in this thread; nothing to act on.")
+
+
+def _previous_reply(state: State) -> str:
+    """What the agent last said to the customer before this turn's message.
+
+    Skips tool calls, which the customer never saw. Empty on a first turn.
+    """
+    seen_customer = False
+    for message in reversed(state["messages"]):
+        if isinstance(message, HumanMessage):
+            seen_customer = True
+        elif seen_customer and isinstance(message, AIMessage) and message.content and not message.tool_calls:
+            return str(message.content)
+    return ""
 
 
 def _language(state: State) -> str:
@@ -188,17 +190,27 @@ def load_customer_if_needed(state: State, runtime: Runtime[Context]) -> dict:
 
 
 def router(state: State) -> dict:
-    """Classify the turn: direct reply or retrieval, and the reply language.
+    """Classify the turn: direct reply, retrieval, or ticket handling, and the
+    reply language.
 
-    Classification only -- it retrieves nothing, answers nothing, and writes
-    no other field. `extra="forbid"` on `RouteDecision` is what holds it to
-    that at the boundary.
+    Classification only -- it retrieves nothing and answers nothing.
+    `extra="forbid"` on `RouteDecision` is what holds it to that at the
+    boundary. As the first node of every turn it also resets the turn
+    output, so a turn that writes none does not publish the previous one's.
     """
+    pending = "yes" if state.get("ticket_draft") else "no"
     decision = invoke_structured(
         RouteDecision,
         [
             {"role": "system", "content": ROUTE_MESSAGE_PROMPT},
-            {"role": "user", "content": f"Message: {_customer_message(state)}"},
+            {
+                "role": "user",
+                "content": (
+                    f"PENDING TICKET DRAFT: {pending}\n\n"
+                    f"PREVIOUS REPLY: {_previous_reply(state) or '(none)'}\n\n"
+                    f"Message: {_customer_message(state)}"
+                ),
+            },
         ],
         settings=_settings(),
     )
@@ -210,6 +222,8 @@ def router(state: State) -> dict:
     return {
         "route": decision.next_step,
         "response_language": decision.response_language,
+        "final_response": None,
+        "ticket_id": None,
     }
 
 
@@ -408,10 +422,11 @@ def _unresolved_notes(state: State) -> str:
 def ticket_agent(state: State) -> dict:
     """Draft the three ticket fields that need reasoning.
 
-    Category, subject and problem description only. Everything a ticket is
-    trusted for -- who it belongs to, what the customer actually wrote, when,
-    which product, what status -- is added by `create_ticket` from values the
-    application already holds.
+    Category, subject and problem description only. The draft also records
+    the customer's message and `_coverage_section` now, because it is
+    submitted on a later turn, when both are gone from state. Everything else
+    a ticket is trusted for -- who it belongs to, when, which product, what
+    status -- is added at submission from values the application holds.
     """
     draft = invoke_structured(
         TicketDraft,
@@ -429,47 +444,12 @@ def ticket_agent(state: State) -> dict:
         settings=_settings(),
     )
     logger.info("ticket_agent: category=%s subject=%r", draft.category, draft.subject)
-    return {"ticket_draft": draft.model_dump()}
-
-def confirm_ticket(state: State) -> dict:
-    """Pause for review, edits, and explicit approval of the drafted ticket.
-
-    A node of its own so that resuming -- which re-runs the paused node from
-    the top -- does not repeat the `ticket_agent` model call. The interrupt
-    payload and resume value are plain JSON data. Invalid input returns to
-    this node via a conditional edge, with one interrupt per invocation.
-    """
-    response = interrupt({
-        **state["ticket_draft"],
-        "error": state.get("ticket_review_error"),
-    })
-    
-    if type(response) is bool:  # Retain approval-only clients.
-        response = {"approved": response}
-    try:
-        review = TicketReview.model_validate(response)
-    except ValidationError:
-        return {"ticket_approved": None, "ticket_review_error": "invalid_review"}
-
-    update = {"ticket_approved": review.approved, "ticket_review_error": None}
-    if review.approved and review.ticket_draft is not None:
-        update["ticket_draft"] = review.ticket_draft.model_dump()
-    logger.info("confirm_ticket: approved=%s", review.approved)
-    return update
-
-
-def decline_ticket(state: State) -> dict:
-    """Tell the customer no ticket was opened.
-
-    Clears `ticket_id` explicitly: `finalize_turn` republishes it whenever a
-    draft exists, and without this a declined turn would carry the previous
-    turn's ticket id.
-    """
-    text = _TICKET_DECLINED[_language(state)]
     return {
-        "ticket_id": None,
-        "final_response": text,
-        "messages": [AIMessage(content=text)],
+        "ticket_draft": {
+            **draft.model_dump(),
+            "original_message": _customer_message(state),
+            "coverage": _coverage_section(state),
+        }
     }
 
 
@@ -504,46 +484,20 @@ def _coverage_section(state: State) -> str:
     return f"{text['failed_draft']} {reason}"
 
 
-def create_ticket(state: State) -> dict:
-    """Persist the ticket and acknowledge it to the customer.
+def propose_ticket(state: State) -> dict:
+    """Show the customer the drafted ticket and ask before submitting it.
 
-    Combines the drafted fields with the trusted ones. `original_message` is
-    the customer's text exactly as received: it is the record of what was
-    asked, and a rephrased copy would quietly rewrite that record. The
-    description is the agent's summary of the request followed by
-    `_coverage_section`, so what was and was not answered is never left to
-    the model.
+    Nothing is persisted here: the draft stays in state, and the customer's
+    reply -- submit, change something, or drop it -- goes to
+    `ticket_assistant` on the next turn.
     """
-    customer = state["customer"]
     draft = state["ticket_draft"]
-    if customer is None or draft is None:
-        raise ValueError("create_ticket requires both a customer and a ticket draft.")
-
-    with closing(connect()) as conn:
-        ticket_id = db_create_ticket(
-            conn,
-            customer_id=customer["id"],
-            product=TICKET_PRODUCT,
-            category=draft["category"],
-            subject=draft["subject"],
-            problem_description="\n\n".join(
-                part
-                for part in (draft["problem_description"], _coverage_section(state))
-                if part
-            ),
-            original_message=_customer_message(state),
-        )
-
-    logger.info(
-        "ticket: created %s for customer %s (product=%s, category=%s)",
-        ticket_id, customer["id"], TICKET_PRODUCT, draft["category"],
+    text = _TICKET_PROPOSAL[_language(state)].format(
+        subject=draft["subject"],
+        category=draft["category"],
+        problem_description=draft["problem_description"],
     )
-    text = _TICKET_ACK[_language(state)].format(ticket_id=ticket_id)
-    return {
-        "ticket_id": ticket_id,
-        "final_response": text,
-        "messages": [AIMessage(content=text)],
-    }
+    return {"final_response": text, "messages": [AIMessage(content=text)]}
 
 
 def finalize_turn(state: State) -> dict:
@@ -551,12 +505,12 @@ def finalize_turn(state: State) -> dict:
 
     Everything in the turn-lived group is set back to `None` so the next turn
     on this thread starts clean -- without this, turn 2 could read turn 1's
-    retrieval or route from the checkpoint and act on it.
+    retrieval or route from the checkpoint and act on it. `ticket_draft` is
+    conversation-lived and left alone: a pending draft waits for the
+    customer's answer.
 
-    `ticket_id` is republished from `ticket_draft`, which is set only on a
-    turn that actually escalated. Passing the stored id through unconditionally
-    would leave the previous turn's ticket attached to every later turn, and
-    the UI would announce a ticket nobody just opened.
+    `ticket_assistant` replies through `messages` only, so its turn's
+    `final_response` is taken from the last message.
     """
     retrieval = state.get("retrieval")
     evidence: list[EvidenceItem] = (
@@ -564,9 +518,13 @@ def finalize_turn(state: State) -> dict:
         if retrieval
         else []
     )
+    final_response = state.get("final_response")
+    last = state["messages"][-1] if state["messages"] else None
+    if final_response is None and isinstance(last, AIMessage):
+        final_response = str(last.content)
     return {
         "response_evidence": evidence,
-        "ticket_id": state.get("ticket_id") if state.get("ticket_draft") else None,
+        "final_response": final_response,
         "route": None,
         "response_language": None,
         "questions": None,
@@ -574,7 +532,4 @@ def finalize_turn(state: State) -> dict:
         "answer_draft": None,
         "grounding": None,
         "answer_revision_count": 0,
-        "ticket_draft": None,
-        "ticket_approved": None,
-        "ticket_review_error": None,
     }

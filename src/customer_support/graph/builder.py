@@ -9,6 +9,7 @@ changes.
       -> load_customer_if_needed
       -> router
          |- respond_directly ----------------------------------.
+         |- ticket_assistant (agent; approval before writes) --|
          '- decompose_question -> search_subquestions           |
               |- (all_high)      generate_answer -> verify      |
               |                     |- (grounded+answered) deliver_answer
@@ -17,11 +18,11 @@ changes.
               |                     |       '-> verify (again)  |
               |                     '- (fail, again) --.        |
               '- (needs_escalation) ------------ ticket_agent   |
-                                                 -> confirm_ticket
-                                                    |- (invalid) confirm_ticket
-                                                    |- (approved) create_ticket
-                                                    '- (declined) decline_ticket
+                                                 -> propose_ticket
       -> finalize_turn -> END
+
+A proposed ticket is only drafted; the customer's reply on a later turn goes
+to `ticket_assistant`, which edits, submits or discards it.
 """
 
 from langgraph.graph import END, START, StateGraph
@@ -30,6 +31,7 @@ from customer_support.graph import nodes, routing
 from customer_support.graph.checkpoint import get_checkpointer
 from customer_support.graph.context import Context
 from customer_support.graph.state import State
+from customer_support.graph.ticket_assistant import build_ticket_assistant
 
 
 def build_graph(checkpointer=None):
@@ -52,9 +54,8 @@ def build_graph(checkpointer=None):
     builder.add_node("revise_answer", nodes.revise_answer_node)
     builder.add_node("deliver_answer", nodes.deliver_answer)
     builder.add_node("ticket_agent", nodes.ticket_agent)
-    builder.add_node("confirm_ticket", nodes.confirm_ticket)
-    builder.add_node("decline_ticket", nodes.decline_ticket)
-    builder.add_node("create_ticket", nodes.create_ticket)
+    builder.add_node("propose_ticket", nodes.propose_ticket)
+    builder.add_node("ticket_assistant", build_ticket_assistant())
     builder.add_node("finalize_turn", nodes.finalize_turn)
 
     builder.add_edge(START, "load_customer_if_needed")
@@ -63,9 +64,10 @@ def build_graph(checkpointer=None):
     builder.add_conditional_edges(
         "router",
         routing.route_after_router,
-        ["respond_directly", "decompose_question"],
+        ["respond_directly", "ticket_assistant", "decompose_question"],
     )
     builder.add_edge("respond_directly", "finalize_turn")
+    builder.add_edge("ticket_assistant", "finalize_turn") # could be changed later to go back to router. and router decides when to finalize.
 
     builder.add_edge("decompose_question", "search_subquestions")
     builder.add_conditional_edges(
@@ -83,14 +85,8 @@ def build_graph(checkpointer=None):
     builder.add_edge("revise_answer", "verify")
     builder.add_edge("deliver_answer", "finalize_turn")
 
-    builder.add_edge("ticket_agent", "confirm_ticket")
-    builder.add_conditional_edges(
-        "confirm_ticket",
-        routing.route_after_confirmation,
-        ["confirm_ticket", "create_ticket", "decline_ticket"],
-    )
-    builder.add_edge("create_ticket", "finalize_turn")
-    builder.add_edge("decline_ticket", "finalize_turn")
+    builder.add_edge("ticket_agent", "propose_ticket")
+    builder.add_edge("propose_ticket", "finalize_turn")
 
     builder.add_edge("finalize_turn", END)
 

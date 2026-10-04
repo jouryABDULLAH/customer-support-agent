@@ -11,6 +11,7 @@ Uses the real `data/app.db` (the node reads `APP_DB_PATH`).
 
 import uuid
 
+from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 
 from customer_support.db.connection import connect, migrate
@@ -42,7 +43,9 @@ EXPECTED_EDGES = {
     ("load_customer_if_needed", "router"),
     ("router", "respond_directly"),
     ("router", "decompose_question"),
+    ("router", "ticket_assistant"),
     ("respond_directly", "finalize_turn"),
+    ("ticket_assistant", "finalize_turn"),
     ("decompose_question", "search_subquestions"),
     ("search_subquestions", "generate_answer"),
     ("search_subquestions", "ticket_agent"),
@@ -52,12 +55,8 @@ EXPECTED_EDGES = {
     ("verify", "ticket_agent"),
     ("revise_answer", "verify"),
     ("deliver_answer", "finalize_turn"),
-    ("ticket_agent", "confirm_ticket"),
-    ("confirm_ticket", "create_ticket"),
-    ("confirm_ticket", "confirm_ticket"),
-    ("confirm_ticket", "decline_ticket"),
-    ("create_ticket", "finalize_turn"),
-    ("decline_ticket", "finalize_turn"),
+    ("ticket_agent", "propose_ticket"),
+    ("propose_ticket", "finalize_turn"),
     ("finalize_turn", "__end__"),
 }
 
@@ -111,7 +110,7 @@ def check_structure() -> None:
         "load_customer_if_needed", "router", "respond_directly",
         "decompose_question", "search_subquestions", "generate_answer",
         "verify", "revise_answer", "deliver_answer", "ticket_agent",
-        "confirm_ticket", "decline_ticket", "create_ticket", "finalize_turn",
+        "propose_ticket", "ticket_assistant", "finalize_turn",
     ):
         check(f"node {name!r} registered", name in nodes, True)
 
@@ -119,19 +118,17 @@ def check_structure() -> None:
     check("edges match the target workflow", edges, EXPECTED_EDGES)
     conditional = {(e.source, e.target) for e in graph.edges if e.conditional}
     check(
-        "the four branches are conditional edges",
+        "the three branches are conditional edges",
         conditional,
         {
             ("router", "respond_directly"),
             ("router", "decompose_question"),
+            ("router", "ticket_assistant"),
             ("search_subquestions", "generate_answer"),
             ("search_subquestions", "ticket_agent"),
             ("verify", "deliver_answer"),
             ("verify", "revise_answer"),
             ("verify", "ticket_agent"),
-            ("confirm_ticket", "create_ticket"),
-            ("confirm_ticket", "confirm_ticket"),
-            ("confirm_ticket", "decline_ticket"),
         },
     )
 
@@ -146,6 +143,11 @@ def check_routing() -> None:
         "retrieve_evidence route",
         route_after_router({"route": "retrieve_evidence"}),
         "decompose_question",
+    )
+    check(
+        "manage_ticket route",
+        route_after_router({"route": "manage_ticket"}),
+        "ticket_assistant",
     )
     check(
         "missing route falls back to retrieval",
@@ -328,39 +330,29 @@ def check_finalize_turn() -> None:
             "answer_draft": "draft",
             "grounding": {"grounded": True, "answered": True, "reason": "ok"},
             "answer_revision_count": 1,
-            "ticket_draft": None,
-            "ticket_id": "STALE-TICKET",
             "final_response": "answer",
         }
     )
     for field in (
         "route", "response_language", "questions", "retrieval",
-        "answer_draft", "grounding", "ticket_draft", "ticket_approved", "ticket_review_error",
+        "answer_draft", "grounding",
     ):
         check(f"clears {field}", answered[field], None)
     check("clears answer_revision_count to 0", answered["answer_revision_count"], 0)
     check("publishes evidence for the UI", len(answered["response_evidence"]), 2)
-    check(
-        "drops a ticket id from an earlier turn",
-        answered["ticket_id"],
-        None,
-    )
-    check("leaves final_response alone", "final_response" in answered, False)
+    check("keeps a final_response a node set", answered["final_response"], "answer")
+    check("leaves a pending ticket_draft alone", "ticket_draft" in answered, False)
+    check("leaves ticket_id alone", "ticket_id" in answered, False)
     check("leaves messages alone", "messages" in answered, False)
     check("leaves customer alone", "customer" in answered, False)
 
-    escalated = finalize_turn(
-        {
-            "messages": [],
-            "retrieval": retrieval(("a", "low")),
-            "ticket_draft": {"category": "other", "subject": "s", "problem_description": "p"},
-            "ticket_id": "TICKET-THIS-TURN",
-        }
+    agent_turn = finalize_turn(
+        {"messages": [AIMessage(content="Ticket T-1 submitted.")], "final_response": None}
     )
     check(
-        "keeps a ticket id created this turn",
-        escalated["ticket_id"],
-        "TICKET-THIS-TURN",
+        "takes final_response from the agent's last message",
+        agent_turn["final_response"],
+        "Ticket T-1 submitted.",
     )
 
     direct = finalize_turn({"messages": [], "final_response": "hi"})

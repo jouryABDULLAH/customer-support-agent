@@ -11,11 +11,13 @@ The RAG pipeline's own prompts live separately, in
 from customer_support.prompts.direct_response import DIRECT_RESPONSE_PROMPT
 from customer_support.prompts.router import ROUTE_MESSAGE_PROMPT
 from customer_support.prompts.ticket import TICKET_DRAFT_PROMPT
+from customer_support.prompts.ticket_assistant import TICKET_ASSISTANT_PROMPT
 from customer_support.prompts.verifier import VERIFY_GROUNDING_PROMPT
 
 __all__ = [
     "DIRECT_RESPONSE_PROMPT",
     "ROUTE_MESSAGE_PROMPT",
+    "TICKET_ASSISTANT_PROMPT",
     "TICKET_DRAFT_PROMPT",
     "VERIFY_GROUNDING_PROMPT",
 ]

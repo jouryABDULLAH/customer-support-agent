@@ -15,16 +15,21 @@ from customer_support.graph.state import State
 logger = logging.getLogger(__name__)
 
 
-def route_after_router(state: State) -> Literal["respond_directly", "decompose_question"]:
-    """Direct reply, or the retrieval path.
+def route_after_router(
+    state: State,
+) -> Literal["respond_directly", "ticket_assistant", "decompose_question"]:
+    """Direct reply, ticket handling, or the retrieval path.
 
     An absent route means the router call did not record one; retrieval is the
     safe side of that, since it can only end in a grounded answer or a ticket,
     whereas a direct reply to a support question is exactly the unsupported
     claim this graph exists to prevent.
     """
-    if state.get("route") == "respond_directly":
+    route = state.get("route")
+    if route == "respond_directly":
         return "respond_directly"
+    if route == "manage_ticket":
+        return "ticket_assistant"
     return "decompose_question"
 
 
@@ -75,15 +80,3 @@ def route_after_verification(
         return "revise_answer"
     logger.info("verification failed after revision; escalating to a ticket.")
     return "ticket_agent"
-
-
-def route_after_confirmation(state: State) -> Literal["confirm_ticket", "create_ticket", "decline_ticket"]:
-    """Create the ticket only on an explicit approval.
-
-    Invalid input re-prompts; only a validated approval may create a ticket.
-    """
-    if state.get("ticket_review_error"):
-        return "confirm_ticket"
-    if state.get("ticket_approved") is True:
-        return "create_ticket"
-    return "decline_ticket"
